@@ -1,0 +1,15 @@
+node_modules/
+.meteor/
+.meteor.local.json
+.dsh/meteor/local.json
+reports/
+coverage/
+dist/
+*.tsbuildinfo
+*.sqlite*
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store

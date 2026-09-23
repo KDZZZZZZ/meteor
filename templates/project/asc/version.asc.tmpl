@@ -1,0 +1,174 @@
+// meteor template contract: qmq-v1
+// Integration artifact: render only after the research subagent submits its results.
+// Single-kernel experiments use kernel_test.asc.tmpl, without this routing layer.
+// Assembly key: {{ASSEMBLY_KEY}}
+// Render every slot before compiling. The final source SHA belongs in the
+// sidecar manifest; embedding it here would make the hash self-referential.
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+
+#include "acl/acl.h"
+#include "kernel_operator.h"
+
+// Canonically ordered defines/includes from the pinned dependency manifest.
+{{DEPENDENCY_PREAMBLE}}
+
+// Match the ABI currently supplied by main.asc. Reuse it when already defined.
+#ifndef TENSOR_GROUP_INFO_DEFINED
+#define TENSOR_GROUP_INFO_DEFINED
+struct TensorInfo {
+    const int64_t* shape;
+    int64_t numDims;
+    int32_t dtype;
+};
+struct TensorGroupInfo {
+    const TensorInfo* tensors;
+    int64_t numTensors;
+};
+#endif
+
+enum class MeteorStatus : uint32_t {
+    Success = 0,
+    InvalidInput = 1,
+    Unsupported = 2,
+    ResourceRejected = 3,
+    LaunchFailed = 4,
+};
+
+enum class MeteorTracePhase : uint32_t {
+    Selected = 0,
+    Finished = 1,
+    Rejected = 2,
+};
+
+struct MeteorCall {
+    GM_ADDR x1;
+    const TensorGroupInfo& info_x1;
+    GM_ADDR x2;
+    const TensorGroupInfo& info_x2;
+    GM_ADDR x1Scale;
+    const TensorGroupInfo& info_x1Scale;
+    GM_ADDR x2Scale;
+    const TensorGroupInfo& info_x2Scale;
+    GM_ADDR y;
+    const TensorGroupInfo& info_y;
+    GM_ADDR yScale;
+    const TensorGroupInfo& info_yScale;
+    int64_t availableCoreNum;
+    aclrtStream stream;
+};
+
+struct MeteorShape {
+    uint32_t m;
+    uint32_t n;
+    uint32_t k;
+};
+
+struct MeteorResources {
+    int32_t aicCores;
+    int32_t aivCores;
+    uint64_t ubBytes;
+    uint64_t l1Bytes;
+    uint64_t l0aBytes;
+    uint64_t l0bBytes;
+    uint64_t l0cBytes;
+};
+
+struct MeteorChoice {
+    uint32_t ruleId;
+    uint32_t implementationId;
+};
+
+// Diagnostic builds must supply a recorder through the host harness.
+// Performance builds have no route recorder calls.
+#if defined(METEOR_ENABLE_ROUTE_TRACE) && !defined(METEOR_ROUTE_TRACE)
+#error "METEOR_ROUTE_TRACE is required when route diagnostics are enabled"
+#endif
+
+static inline void meteor_report_route(
+    MeteorTracePhase phase, MeteorChoice choice, MeteorStatus status)
+{
+#if defined(METEOR_ENABLE_ROUTE_TRACE)
+    METEOR_ROUTE_TRACE(static_cast<uint32_t>(phase), choice.ruleId,
+        choice.implementationId, static_cast<uint32_t>(status));
+#else
+    (void)phase;
+    (void)choice;
+    (void)status;
+#endif
+}
+
+// Shared helpers are dependency-resolved and emitted exactly once.
+{{SHARED_CODE}}
+
+// Defines meteor_describe_call(call, shape, resources). On success it has
+// validated tensor metadata and populated every resource needed by the rules.
+{{HOST_CONTEXT_HELPERS}}
+
+// Each module owns its immutable symbol prefix and device annotations.
+// The assembler inserts source verbatim; it never renames arbitrary C++.
+{{KERNEL_DEVICE_CODE}}
+
+// Each launcher has this uniform host signature:
+// MeteorStatus <prefix>launch(const MeteorCall&, const MeteorShape&,
+//                            const MeteorResources&);
+// It owns tiling, workspace, launch, synchronization and cleanup for its module.
+{{KERNEL_HOST_LAUNCHERS}}
+
+static MeteorChoice meteor_choose_kernel(
+    const MeteorShape& shape, const MeteorResources& resources,
+    int64_t availableCoreNum)
+{
+    // Generated after research submission from version.spec.json route rules.
+    {{ROUTE_SELECT_BODY}}
+    return {0U, 0U};
+}
+
+extern "C" void run_kernel(
+    GM_ADDR x1,
+    const TensorGroupInfo& info_x1,
+    GM_ADDR x2,
+    const TensorGroupInfo& info_x2,
+    GM_ADDR x1Scale,
+    const TensorGroupInfo& info_x1Scale,
+    GM_ADDR x2Scale,
+    const TensorGroupInfo& info_x2Scale,
+    GM_ADDR y,
+    const TensorGroupInfo& info_y,
+    GM_ADDR yScale,
+    const TensorGroupInfo& info_yScale,
+    int64_t availableCoreNum,
+    aclrtStream stream)
+{
+    const MeteorCall call{
+        x1, info_x1, x2, info_x2, x1Scale, info_x1Scale,
+        x2Scale, info_x2Scale, y, info_y, yScale, info_yScale,
+        availableCoreNum, stream,
+    };
+    MeteorShape shape{};
+    MeteorResources resources{};
+    const MeteorStatus inputStatus = meteor_describe_call(call, shape, resources);
+    if (inputStatus != MeteorStatus::Success) {
+        meteor_report_route(MeteorTracePhase::Rejected, {0U, 0U}, inputStatus);
+        return;
+    }
+
+    const MeteorChoice choice = meteor_choose_kernel(shape, resources, availableCoreNum);
+    if (choice.implementationId == 0U) {
+        meteor_report_route(MeteorTracePhase::Rejected, choice, MeteorStatus::Unsupported);
+        return;
+    }
+
+    meteor_report_route(MeteorTracePhase::Selected, choice, MeteorStatus::Success);
+    MeteorStatus status = MeteorStatus::Unsupported;
+    switch (choice.implementationId) {
+        // Generated case arms call the corresponding module's host launcher.
+        // Every case terminates with break; no fall-through or fallback route.
+        {{DISPATCH_CASES}}
+        default:
+            break;
+    }
+    meteor_report_route(MeteorTracePhase::Finished, choice, status);
+}
