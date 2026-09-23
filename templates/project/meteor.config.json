@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "execution": { "backend": "mock", "profile_ref": "mock-qmq-v1" },
+  "case_suite": "asc/case-suite.json",
+  "environment": {
+    "environment_ref": "mock-ascend-qmq-v1",
+    "hardware": "simulated-ascend",
+    "toolchain": "mock-no-compiler",
+    "measurement_protocol_ref": "mock-median-5-v1",
+    "simulated": true
+  },
+  "sampling": { "epsilon": 0.1, "lambda": 2, "tau_hours": 72, "count": 4 },
+  "budget": { "max_experiments": 12, "max_wall_time_seconds": 3600 },
+  "integration": { "min_relative_improvement": 0.02 }
+}

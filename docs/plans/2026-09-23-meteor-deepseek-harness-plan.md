@@ -4,20 +4,22 @@
 
 **研究单元：** 一个 `research_id` 对应一个连续的 subagent session，可包含多轮实验、多个 kernel 和多个不可变 revision。Agent 自主决定实验顺序、测试调用、分析和下一轮修改。全部研究共用一份基础提示词，测试与性能分析分别作为可调用 skill。
 
+**用户补充的 chief 职责：** 启动时可配置本轮随机分发，或指定初始 kernel 与知识；也可要求验证给定假设。默认随机分发沿用新鲜度策略，指定材料不混入随机抽样。给定假设可与任一材料模式组合，只有缺省时才由 subagent 提出。材料只作启发；给定假设是本轮验证目标。manifest 与 seed 保存 chief 输入和实际分发。
+
 **交付：** 必交假设结论、实验与证据记录、经验更新、给 chief 的报告和下一步建议；可选提交零个、一个或多个 kernel。**编写 kernel 的 subagent 负责在提交前完成该精确 revision 的独立全尺寸测试**，随源码提交适用范围、完整逐 case 性能数据和原始回执引用。未测完的 kernel 不能作为交付实现提交，测试责任不移交 chief。假设结论、kernel 性能表现和集成选择分别记录。
 
 **集成时机：** subagent 结束并完成有效交付后，宿主自动触发集成程序，依据 subagent 已提交的逐 case 全尺寸性能数据生成 shape 分桶、路由和新的 version。chief 无须手动调用集成或补跑测试，只接收研究报告和集成回执。研究实验直接运行单个 kernel；version 是多个 kernel 按 case shape 路由的集成产物。
 
-**运行与访问：** 首版使用 mock，真实编译和 NPU 实验待用户提供 SSH 配置后接入。连接凭据集中管理，项目只保存 profile 引用。chief 可访问全部文件并负责配置；subagent 也可读取当前运行环境中所有文件，遵循原有操作系统权限。分发的 kernel/知识仅用于启发，鼓励主动阅读其他实现、知识和实验记录。
+**运行与访问：** 默认使用 mock，可通过集中 profile 切换到 SSH backend。连接凭据集中管理，项目只保存 profile 引用。chief 可访问全部文件并负责配置；subagent 也可读取当前运行环境中所有文件，遵循原有操作系统权限。分发的 kernel/知识仅用于启发，鼓励主动阅读其他实现、知识和实验记录。
 
-**当前交付范围：** 本文定义研究协议、目标完成条件、skill、文件架构和提示词大纲；现有 [version 模板草案](../../meteor/templates/project/asc/version.asc.tmpl)用于研究结束后的集成。单 kernel 实验模板、skill 和运行代码在本文中定义，尚未实现；本轮不连接 SSH。DSH 接口依据已核实的官方 commit `00102833dfaee1da9f48a3a8eae9d34005a75218`。
+**当前交付范围：** 本文记录已实现的研究协议、目标完成条件、skill、文件架构和提示词大纲；[version 模板](../../templates/project/asc/version.asc.tmpl)用于研究结束后的集成，[single-kernel 模板](../../templates/project/asc/kernel_test.asc.tmpl)用于实验包装。mock backend、结构化 SQLite 经验库、提交校验、自动 version 装配和 DSH `0.1.7-alpha.2` 宿主接入已落到模板代码；SSH backend 通过集中 profile 启用，真实硬件验证结果另行记录。按用户选择使用 alpha.2，DSH 接口依据安装包和已核实的官方 commit `00102833dfaee1da9f48a3a8eae9d34005a75218`。
 
 ## 1. 职责与架构
 
 | 主体 | 职责 |
 | --- | --- |
-| live/chief | 与用户协作，访问和维护文件，完成配置，启动/管理研究 subagent，阅读研究报告、建议和自动集成回执 |
-| 研究 subagent | 提出可检验假设，自主循环实验和分析；对自己编写并提交的 kernel 完成独立全尺寸测试，提交结论、可选 kernel、适用范围及完整性能数据 |
+| live/chief | 与用户协作，访问和维护文件，完成配置；启动时选择随机或指定初始 kernel/知识，可给定待验证假设；管理研究 subagent，阅读研究报告、建议和自动集成回执 |
+| 研究 subagent | 验证给定假设并补齐实验定义，缺省时才自主提出假设；自主循环实验和分析，对自己编写并提交的 kernel 完成独立全尺寸测试，提交结论、可选 kernel、适用范围及完整性能数据 |
 | 测试与分析 skill | 在同一 Agent 上下文中提供实验方法、操作步骤和结果解释规范；由 Agent 决定何时、带什么参数调用 |
 | meteor 宿主与底层工具 | 管理 session/job、运行请求、设备锁、回执、不可变实验记录、提交校验和幂等入库；有效交付后自动投递集成任务 |
 | 结构化经验库 | 保存假设及修订、实验、单 kernel 测量、机制知识、反例、来源关系和新鲜度事件 |
@@ -25,8 +27,8 @@
 
 ```mermaid
 flowchart TD
-    C[chief：配置、维护、启动研究] --> S[抽样启发材料]
-    S --> H[subagent：提出可检验假设]
+    C[chief：配置、选择材料模式、可给定假设] --> S[随机或指定分发启发材料]
+    S --> H[subagent：固定给定或自主提出的假设]
     H --> D[设计实验并编写 kernel]
     D --> T[调用单 kernel 测试 skill]
     T --> A[调用性能分析 skill，解释证据]
@@ -43,7 +45,7 @@ flowchart TD
     V --> C2
 ```
 
-**ADR-01：以假设研究 subagent 为运行单元。** `meteor_start` 创建一个研究任务和一个连续 Agent session；一次任务内允许反复实验。chief 决定新任务数量和时机，插件不自动补位或派生下一代 Agent。
+**ADR-01：以假设研究 subagent 为运行单元。** `meteor_start` 创建一个研究任务和一个连续 Agent session；一次任务内允许反复实验。chief 决定新任务数量、时机、初始材料模式及可选的给定假设，插件不自动补位或派生下一代 Agent。
 
 **ADR-02：研究控制权属于 Agent。** 测试和性能分析通过 skill 使用底层工具。宿主只保证请求合法、记录完整和资源有序，不在 Agent 交付一份源码后自动强制跑完固定阶段，也不以“一次评测”为研究次数上限。
 
@@ -58,6 +60,8 @@ flowchart TD
 ## 2. Agent 的目标与完成条件
 
 ### 2.1 首先把假设写清楚
+
+chief 提供 `hypothesis` 时，statement 原文和已有条件构成本轮的原始验证目标，subagent 补齐缺失的 scope、实验定义、对照、预测及判定标准。未提供时才由 subagent 自主提出假设。这一选择独立于初始上下文是随机还是指定分发。
 
 假设应说明“在什么条件下，哪一种改动通过什么机制，预期改变什么可观察量”。开始对应实验前保存 `hypothesis.json`，至少包含：
 
@@ -104,8 +108,8 @@ kernel 全尺寸排名、是否击败当前最佳实现、是否产生可集成�
 
 | 步骤 | 主体 | 行为 |
 | --- | --- | --- |
-| 1. 启动与启发材料 | chief / 程序 | 分配 research ID、预算和固定 case 全集，按新鲜度抽样启发材料，创建一个 subagent |
-| 2. 提出假设与判定标准 | subagent | 自主阅读，明确假设、scope、预测、对照和反证条件 |
+| 1. 启动与初始上下文 | chief / 程序 | 分配 research ID、预算和固定 case 全集；选择默认或本轮配置的随机抽样，或指定 kernel/知识，可同时给定待验证假设；记录 chief 输入与实际分发，创建一个连续 subagent |
+| 2. 固定假设与判定标准 | subagent | 有给定假设时保留原文并补齐实验定义，缺省时才自主提出；明确 scope、预测、对照和反证条件，继续自主阅读和选择实现 |
 | 3. 设计实验并编写 kernel | 同一 subagent | 实现干预与对照，可生成多个实验 kernel、消融版本或新 revision |
 | 4. 调用测试 skill | 同一 subagent | 自主安排构建、调试、单 kernel 全尺寸测试和必要复测，获得独立回执 |
 | 5. 调用性能分析 skill | 同一 subagent | 选择 profile/配对/消融，分析机制与性能证据，决定如何继续 |
@@ -184,8 +188,8 @@ kernel 全尺寸排名、是否击败当前最佳实现、是否产生可集成�
 
 | 模板 | 使用时机与契约 |
 | --- | --- |
-| `asc/kernel_test.asc.tmpl`（待实现） | 研究实验；固定算子 ABI/输入处理，插入单个模块及 launcher，直接调用一个实现，返回真实执行或 unsupported 状态；没有跨 kernel 的路由表 |
-| `asc/version.asc.tmpl`（已有草案） | 研究结束后的集成；插入多个模块，根据有序路由 AST 生成选择与分派代码 |
+| `asc/kernel_test.asc.tmpl` | 研究实验；固定算子 ABI/输入处理，插入单个模块及 launcher，直接调用一个实现，返回真实执行或 unsupported 状态；没有跨 kernel 的路由表 |
+| `asc/version.asc.tmpl` | 研究结束后的集成；插入多个模块，根据有序路由 AST 生成选择与分派代码 |
 
 模块 manifest 至少包含 `kernel_id/revision`、`operator_abi`、预分配符号前缀、device/host 源码和依赖哈希、设备入口、launcher、硬件/工具链及合法输入/资源条件。Host launcher 契约为：
 
@@ -261,11 +265,18 @@ subagent 结束并完成有效提交后，宿主的提交事件处理器自动�
 
 并行研究各自提交后，程序按算子、环境、case suite 和目标 version 通道排队并串行更新，集成使用固定库快照和基底 revision。提交事件以 `submission_id` 幂等消费；重复通知或恢复重试不重复发布同一集成结果。基底变化时程序基于最新有效基底重新计算，并以原子检查更新产物引用，避免覆盖其他成果，无需 chief 手动处理常规并发冲突。
 
-## 7. 初始抽样、知识库与新鲜度
+## 7. 初始上下文、知识库与新鲜度
 
-抽样从全局兼容材料中按新鲜度提供 kernel/知识，仅作为启发。不指定修改对象、代码父代或装配基底。Agent 可继续阅读全部文件、新入库知识和其他研究结果，可以完全不使用分发的 kernel。
+chief 通过 `meteor_start.initial_context` 选择本轮分发方式：
 
-`seed.json` 保存原始分发事实、候选及权重、库 revision、时间、算法版本和随机种子；`material_refs.jsonl` 记录实际采用的材料及读取时 revision/哈希，区分 `seed` 与 `discovered`。跨来源关系不组织成 Agent 家族树。
+- **`random`（默认）：** 从全局兼容材料中按原新鲜度策略分发 kernel/知识。可用 `sampling` 覆盖本轮的 `count`、`seed`、`epsilon`、`lambda`、`tau_hours`；未覆盖项沿用项目配置，不修改项目默认值。
+- **`specified`：** 用 `kernel_refs`、`knowledge_refs` 提供明确材料，不混入随机分发，也不使用随机抽样参数。引用支持库材料 ID、`sqlite://kind/id` 或文件/模块路径。
+
+两种模式的 kernel/知识都仅作启发，不要求修改给定 kernel，也不指定代码父代或装配基底。Agent 可继续阅读全部文件、新入库知识和其他研究结果，可以完全不使用分发的 kernel。可选的 `hypothesis` 与材料模式独立：它是此轮应验证的原始目标；缺省时才由 Agent 提出。
+
+每份 `manifest.json` 与 `seed.json` 保存 chief 的启动输入和实际分发，便于核对指定引用及随机参数。随机分发另保存候选及权重、库 revision、时间、算法版本和随机种子；指定分发记录引用的解析结果。`material_refs.jsonl` 记录实际采用的材料及读取时 revision/哈希，区分初始分发 `seed` 与自主发现 `discovered`。跨来源关系不组织成 Agent 家族树。
+
+随机模式沿用以下新鲜度与抽样定义：
 
 ```text
 freshness(x) = exp(-(now - last_novelty_event_at(x)) / tau)
@@ -281,7 +292,7 @@ P(x) = epsilon / |E| + (1 - epsilon) * weight(x) / sum(weight(y), y in E)
 
 | 实体 | 内容 |
 | --- | --- |
-| `research_runs` | chief/job/固定 Agent session、backend、预算、运行状态、目标完成标志 |
+| `research_runs` | chief/job/固定 Agent session、backend、预算、启动输入、初始材料模式和可选给定假设、运行状态、目标完成标志 |
 | `hypotheses / hypothesis_revisions / verdicts` | 命题、范围、预测、判定标准、修订及支持/反证结论 |
 | `experiments / experiment_controls` | 实验问题、干预、对照/消融、kernel revision、测量计划 |
 | `kernel_artifacts / kernel_submissions` | 全部实验模块；Agent 明确提交的子集及各自适用范围 |
@@ -300,7 +311,7 @@ P(x) = epsilon / |E| + (1 - epsilon) * weight(x) / sum(weight(y), y in E)
 插件提供宿主接入和项目模板。初始化后的代码、基础提示词、skill、实验契约及模板由 chief 维护。
 
 ```text
-meteor/                                  # 插件源代码，以下除注明外均待实现
+meteor/                                  # 插件源代码与项目模板
   package.json
   cordis.patch.yml
   src/
@@ -311,7 +322,7 @@ meteor/                                  # 插件源代码，以下除注明外�
     project.ts                           # 加载项目实现并固定运行快照
   templates/project/
     asc/version.asc.tmpl                 # 已有：仅用于研究交付后的集成
-    asc/kernel_test.asc.tmpl              # 待实现：只绑定一个 kernel 的实验入口
+    asc/kernel_test.asc.tmpl              # 只绑定一个 kernel 的实验入口
     ...                                  # 以下项目结构的版本化模板
 ```
 
@@ -346,7 +357,7 @@ meteor/                                  # 插件源代码，以下除注明外�
     kernel.json / device.asc / host.asc
   knowledge/
     migrations/0001.sql / store.py / query.py
-  tools/remote_npu/                      # 现有远端工具的适配入口
+  tools/remote_npu/                      # 可从用户原 workspace 适配的远端 harness 入口，模板不复制凭据
   versions/
     kernel_meteor_version_<id>.asc
     <id>.spec.json / <id>.manifest.json / <id>.source-map.json
@@ -383,17 +394,22 @@ chief 的文件访问与配置能力保持开放。subagent 可写自己的假�
 完成目标的标准是得到足够证据支持或证伪该假设。
 得到更快 kernel、获得更高排名、生成 version 都不能代替假设判定。
 
-输入：research_id、研究目标、启发 kernel/知识、算子与模块契约、
-固定 case suite、环境/预算、两个 skill 的入口、研究写入目录。
+输入：research_id、研究目标、初始上下文模式与实际分发的 kernel/知识、
+chief 可选的给定假设、manifest/seed、算子与模块契约、固定 case suite、
+环境/预算、两个 skill 的入口、研究写入目录。
 
 上下文与探索
-- 分发材料仅用于启发。主动阅读其他 kernel、知识和实验记录，自主选择实现。
+- 核对 manifest/seed 中 chief 的输入与实际分发；specified 不混入随机材料。
+- 两种模式的材料都只作启发。主动阅读其他材料，自主选择实现，不要求修改给定 kernel。
 - 可读取所有文件。在同一 session 中持续工作，按需加载 skill、保存和压缩记忆。
 - 原始假设、修订、实验、证据和未决问题都要可追溯。
 
-步骤 2：提出假设
+步骤 2：固定假设
+- chief 已给定 hypothesis 时验证该原始目标，保留 statement 原文并补齐实验定义。
+- chief 未提供 hypothesis 时才自主提出；此规则独立于初始材料模式。
 - 写明命题、范围、机制、可测预测、支持与反证标准、对照及主要混杂因素。
-- 修改命题、范围或标准时保存新 revision 和理由，保留旧命题的结论。
+- 修改命题、范围或标准时保存新 revision 和理由，保留旧命题原文与状态。
+- 分别报告原假设及修订结论，不以修订成立宣称 chief 给定的原假设成立。
 
 步骤 3–6：自主实验循环
 - 设计能区分假设与替代解释的实验，编写一个或多个 kernel/对照/消融实现。
@@ -428,18 +444,50 @@ chief 的文件访问与配置能力保持开放。subagent 可写自己的假�
 | chief 工具 | 行为 |
 | --- | --- |
 | `meteor_init` | 初始化/维护当前项目的代码、skill、模板和库结构 |
-| `meteor_start` | 启动一个假设研究 subagent；指定目标、预算、case suite、抽样策略和 profile |
+| `meteor_start` | 启动一个连续研究 subagent；传入目标、可选 ID/预算、随机或指定初始上下文，以及可选的待验证假设；case suite 和 backend/profile 取自项目配置 |
 | `meteor_status` | 查询研究状态、实验进度、判定、kernel 提交、自动集成状态和报告 |
 | `meteor_control` | 协作式暂停、继续或取消原研究任务 |
 | `meteor_evidence` | 读取假设、实验、kernel、知识与报告记录 |
 
+`meteor_start` 启动参数如下；`goal` 必填，提供 `initial_context` 时 `mode` 必填，提供 `hypothesis` 时 `statement` 必填：
+
+```typescript
+type MeteorStartInput = {
+  goal: string;
+  research_id?: string;
+  budget?: { max_experiments?: number; max_wall_time_seconds?: number };
+  initial_context?: {
+    mode: 'random' | 'specified';
+    sampling?: { count?: number; seed?: number; epsilon?: number; lambda?: number; tau_hours?: number };
+    kernel_refs?: string[];
+    knowledge_refs?: string[];
+  };
+  hypothesis?: {
+    statement: string;
+    scope?: string;
+    mechanism?: string;
+    intervention?: string;
+    controls?: string[];
+    predictions?: string[];
+    support_criteria?: string[];
+    refutation_criteria?: string[];
+    confounders?: string[];
+    measurement_plan?: string;
+  };
+};
+```
+
+省略 `initial_context` 等同默认随机分发；`sampling` 仅供 random 模式调整本轮参数，specified 按给定引用分发。hypothesis 可与任一模式组合；指定材料是参考，指定假设是验证目标。Chief 核对项目配置后即可启动，使用已有的一份 persona 与两个 skill。示例见 [README](../../README.md#starting-a-research-task)。
+
 集成作为宿主内部的提交事件处理能力，不要求 chief 使用单独的集成工具；chief 通过 `meteor_status / meteor_evidence` 获取自动生成的 version 和回执。
 
-DSH 使用 `ctx.jobs.start({kind:'meteor', owner:chief.id, ...})` 与一次 `ctx.subagents.start('spawn', {parent:chief, ...})`。单次 run 内可执行多轮工具调用；它在 Agent 最终答复后结算，因此实验失败回执直接返回原会话，不能被当作必须终止的边界。[jobs 接口](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/jobs/jobs/src/types.ts)、[spawn driver](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/subagent/subagent-in-process-driver/src/index.ts)
+DSH 使用 `ctx.jobs.start({kind:'meteor', owner:chief.id, ...})` 与一次 `ctx.subagents.start('spawn', {parent:chief, ...})`。alpha.2 jobs 的 owner 是会话 ID，最终输出通过 job `result` 字符串返回 chief；meteor 同时把持久报告写入项目 evidence。单次 run 内可执行多轮工具调用；它在 Agent 最终答复后结算，因此实验失败回执直接返回原会话，不能被当作必须终止的边界。[jobs 接口](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/jobs/jobs/src/types.ts)、[spawn driver](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/subagent/subagent-in-process-driver/src/index.ts)
 
 启用同 session 的自动 compaction；`memory.md` 保存假设版本、判定标准、实验沿革、原始证据引用及下一步。运行中不使用仅支持 idle 的 `compactNow`，也不通过新建 Agent 恢复摘要。`skill({name})` 在同一会话加载正文，压缩后可重新读取。[compaction 契约](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/docs/subsystems/compaction.md)、[skill 契约](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/docs/subsystems/skills.md)
 
-Agent 工具白名单包含全文件读取、研究写入、skill 及实验请求能力；全部操作维持原 session。原生 jobs 提供进度与停止入口。报告摘要、建议和引用写入 `JobOutcome.result` 字符串，默认通知提示 chief 读取 `job_output`；持久报告另外通过 meteor 工具重复读取。[chief 通知](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/jobs/tool-jobs/README.md)
+Agent 工具白名单包含全文件读取、研究写入、skill 及实验请求能力；全部操作维持原 session。原生 jobs 提供进度与停止入口。报告摘要、建议和引用写入 job `output` 字符串，chief 可通过 job 输出和 `meteor_status / meteor_evidence` 读取持久报告。[chief 通知](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/jobs/tool-jobs/README.md)
+
+测试真实 DSH 行为时，若研究 Agent 表现不足，应修改 `prompts/meteor.md` 或对应 skill 后重新运行测试；不得向正在运行的 Agent 追加人工提示、代写最终结果，或手工修补它的研究结论。
 
 ### 10.2 先 mock，集中配置 SSH
 
@@ -458,7 +506,7 @@ mock 演练多轮实验、全尺寸矩阵、profile、失败、证据冲突、�
 
 用户提供集中 profile 后，由 chief 协助配置。项目只保存引用，宿主运行时解析系统 SSH host alias/agent 或统一凭据提供方；不把私钥、密码、令牌复制到模板、提示词、seed、快照、日志或报告。全文件可读不意味着自动把凭据注入上下文。
 
-SSH adapter 可复用 [bootstrap_environment.py](../../tools/remote_npu/bootstrap_environment.py)、[run_sequence_plan.py](../../tools/remote_npu/run_sequence_plan.py)、[run_batch.py](../../tools/remote_npu/run_batch.py) 和 [collect_evidence.py](../../tools/remote_npu/collect_evidence.py)，先适配为单 kernel 实验身份与显式 unsupported 记录，再接入真实运行。连接传递集中管理，避免复制或回显凭据。
+SSH adapter 可复用用户原 workspace 中的 `tools/remote_npu/bootstrap_environment.py`、`run_sequence_plan.py`、`run_batch.py` 和 `collect_evidence.py` 思路，先适配为单 kernel 实验身份与显式 unsupported 记录，再接入真实运行。连接传递集中管理，避免复制或回显凭据；本文不把这些远端 harness 记为厂商源码。
 
 不同研究可并行生成与分析；同一 NPU 计时由设备锁隔离，避免并发干扰。每个实验有独立工作目录和状态。SSH 断线进入 `UNKNOWN_REMOTE`，核对原进程、锁和回执后恢复，不能盲目重复执行。
 
@@ -486,6 +534,7 @@ SUBMISSION_COMMITTED → QUEUED → SELECTING → ASSEMBLING → ASSEMBLED
 | 顺序 | 交付 | 验收要求 |
 | --- | --- | --- |
 | 1 | 初始化与项目契约 | 默认 mock；仓库、唯一 persona、两个 skill、两种模板清晰；重复 init 保留 chief 修改 |
+| 1a | chief 启动输入 | 默认随机、仅本轮随机参数、指定 kernel/知识无随机混入；两种模式均可给定假设，缺省才自主提出；manifest/seed 可核对输入与实际分发，修订保留原假设原文与状态 |
 | 2 | 研究身份和证据库 | 一个 research 下多轮实验、多 kernel/revision；所有证据可追溯，提交幂等、mock/真实隔离 |
 | 3 | 单 kernel 测试工具及 skill | 每个 kernel 独立遍历 case 全集；编写 subagent 在提交前完成全尺寸测试；缺行、部分执行、源码/环境不匹配或只交摘要均拒收并退回原 Agent；无跨实现回退，probe 不替代 full |
 | 4 | 性能分析 skill | Agent 控制 profile、对照、复测与消融；能根据返回证据重新编码，宿主不自动分桶或结束 |
@@ -495,4 +544,4 @@ SUBMISSION_COMMITTED → QUEUED → SELECTING → ASSEMBLING → ASSEMBLED
 | 8 | chief 报告与恢复 | 报告含假设结论、目标是否完成、可选 kernel/适用范围及建议；集成另有回执；中断不换 Agent，重试不重复入库 |
 | 9 | 用户配置后的真实验证 | 集中 SSH 配置、不复制凭据；真实单 kernel 全尺寸与 profile 回执正确，同 NPU 计时隔离 |
 
-当前只完成架构文档与已有集成模板的用途修订。测试/分析 skill、单 kernel 模板、工具实现、DSH 组合运行和真实 NPU 验证均留待实施；mock 演练通过也不代表真实研究目标已完成。
+当前已实现初始化模板、唯一 persona、两个 skill、单 kernel 模板、mock/SSH runner 接口、结构化 SQLite 经验库、提交校验、DSH alpha.2 宿主生命周期、自动集成 outbox 和 version 装配。mock 演练通过只证明协议和装配路径可运行，不代表真实研究目标或真实硬件性能已完成；真实 DSH/hardware 结果单独记录。

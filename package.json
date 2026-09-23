@@ -1,0 +1,17 @@
+{
+  "name": "meteor-dsh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hypothesis-driven kernel research for DeepSeek Harness",
+  "exports": "./dist/src/index.js",
+  "bin": { "meteor": "./dist/src/cli.js" },
+  "files": ["dist", "cordis.patch.yml", "README.md", "docs"],
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.ts templates/project/tools/meteor/tests/*.test.ts",
+    "check": "node scripts/check.mjs",
+    "demo": "node examples/mock-research.ts"
+  }
+}

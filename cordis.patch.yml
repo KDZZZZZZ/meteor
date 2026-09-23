@@ -1,0 +1,5 @@
+# Build meteor first, then install its package in the selected DSH profile.
+# This patch does not change global DSH settings or store connection credentials.
+- insert:
+    - id: meteor
+      name: meteor-dsh

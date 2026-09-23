@@ -1,0 +1,112 @@
+// meteor template contract: qmq-v1
+// Single-kernel experiment artifact. It binds one immutable kernel revision and
+// never routes to another implementation or integrated version.
+// Assembly key: {{ASSEMBLY_KEY}}
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+
+#include "acl/acl.h"
+#include "kernel_operator.h"
+
+// Canonically ordered defines/includes from the pinned dependency manifest.
+{{DEPENDENCY_PREAMBLE}}
+
+#ifndef TENSOR_GROUP_INFO_DEFINED
+#define TENSOR_GROUP_INFO_DEFINED
+struct TensorInfo {
+    const int64_t* shape;
+    int64_t numDims;
+    int32_t dtype;
+};
+struct TensorGroupInfo {
+    const TensorInfo* tensors;
+    int64_t numTensors;
+};
+#endif
+
+enum class MeteorStatus : uint32_t {
+    Success = 0,
+    InvalidInput = 1,
+    Unsupported = 2,
+    ResourceRejected = 3,
+    LaunchFailed = 4,
+};
+
+struct MeteorCall {
+    GM_ADDR x1;
+    const TensorGroupInfo& info_x1;
+    GM_ADDR x2;
+    const TensorGroupInfo& info_x2;
+    GM_ADDR x1Scale;
+    const TensorGroupInfo& info_x1Scale;
+    GM_ADDR x2Scale;
+    const TensorGroupInfo& info_x2Scale;
+    GM_ADDR y;
+    const TensorGroupInfo& info_y;
+    GM_ADDR yScale;
+    const TensorGroupInfo& info_yScale;
+    int64_t availableCoreNum;
+    aclrtStream stream;
+};
+
+struct MeteorShape {
+    uint32_t m;
+    uint32_t n;
+    uint32_t k;
+};
+
+struct MeteorResources {
+    int32_t aicCores;
+    int32_t aivCores;
+    uint64_t ubBytes;
+    uint64_t l1Bytes;
+    uint64_t l0aBytes;
+    uint64_t l0bBytes;
+    uint64_t l0cBytes;
+};
+
+// Shared helpers are dependency-resolved and emitted exactly once.
+{{SHARED_CODE}}
+
+// Defines meteor_describe_call(call, shape, resources).
+{{HOST_CONTEXT_HELPERS}}
+
+// The assembler inserts source verbatim; it never renames arbitrary C++.
+{{KERNEL_DEVICE_CODE}}
+
+// MeteorStatus <prefix>launch(const MeteorCall&, const MeteorShape&,
+//                            const MeteorResources&);
+{{KERNEL_HOST_LAUNCHERS}}
+
+extern "C" void run_kernel(
+    GM_ADDR x1,
+    const TensorGroupInfo& info_x1,
+    GM_ADDR x2,
+    const TensorGroupInfo& info_x2,
+    GM_ADDR x1Scale,
+    const TensorGroupInfo& info_x1Scale,
+    GM_ADDR x2Scale,
+    const TensorGroupInfo& info_x2Scale,
+    GM_ADDR y,
+    const TensorGroupInfo& info_y,
+    GM_ADDR yScale,
+    const TensorGroupInfo& info_yScale,
+    int64_t availableCoreNum,
+    aclrtStream stream)
+{
+    const MeteorCall call{
+        x1, info_x1, x2, info_x2, x1Scale, info_x1Scale,
+        x2Scale, info_x2Scale, y, info_y, yScale, info_yScale,
+        availableCoreNum, stream,
+    };
+    MeteorShape shape{};
+    MeteorResources resources{};
+    MeteorStatus status = meteor_describe_call(call, shape, resources);
+    if (status != MeteorStatus::Success) {
+        return;
+    }
+    {{KERNEL_LAUNCH_CALL}}
+    (void)status;
+}

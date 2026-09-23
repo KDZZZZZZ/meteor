@@ -1,0 +1,162 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { renderSingleKernel } from './assemble.ts';
+import type { BuildReceipt, KernelModule, Project } from './contracts.ts';
+import { MockRunner } from './runners/mock.ts';
+import { SshRunner } from './runners/ssh.ts';
+import type { MockFixture, Runner } from './runners/contract.ts';
+import { assertResearchActive } from './research.ts';
+import { canonical, hashObject, inside, readJson, safeId, sha256, writeImmutable } from './util.ts';
+
+export interface BuildKernelInput {
+  research_id: string;
+  experiment_id: string;
+  kernel_path: string;
+  fixture?: MockFixture | string;
+  idempotency_key?: string;
+  signal?: AbortSignal;
+}
+
+function slash(path: string): string {
+  return path.split(sep).join('/');
+}
+
+export function projectRef(project: Project, path: string): string {
+  return slash(relative(resolve(project.root), resolve(path)));
+}
+
+export function experimentDir(project: Project, researchId: string, experimentId: string): string {
+  return resolve(project.dataRoot, 'research', safeId(researchId), 'experiments', safeId(experimentId));
+}
+
+export function buildReceiptPath(project: Project, receipt: BuildReceipt): string {
+  return resolve(experimentDir(project, receipt.research_id, receipt.experiment_id), 'builds', `${receipt.build_id}.json`);
+}
+
+export function selectRunner(project: Project): Runner {
+  if (project.config.execution.backend === 'mock') return new MockRunner();
+  return new SshRunner();
+}
+
+export function readKernelModule(project: Project, kernelPath: string): KernelModule {
+  const cleanPath = slash(kernelPath);
+  return readJson<KernelModule>(inside(project.root, `${cleanPath}/kernel.json`));
+}
+
+function sourcePieces(project: Project, module: KernelModule): unknown {
+  const dependencyPieces = module.dependencies.map(dep => ({
+    id: dep.id,
+    kind: dep.kind,
+    path: dep.path,
+    sha256: dep.sha256,
+    content_sha256: sha256(readFileSync(inside(project.root, dep.path), 'utf8')),
+  }));
+  return {
+    module,
+    device_sha256: sha256(readFileSync(inside(project.root, module.device_file), 'utf8')),
+    host_sha256: sha256(readFileSync(inside(project.root, module.host_file), 'utf8')),
+    dependencies: dependencyPieces,
+    operator_abi: project.suite.operator_abi,
+  };
+}
+
+export function computeSourceHash(project: Project, module: KernelModule): string {
+  return hashObject(sourcePieces(project, module));
+}
+
+function writeImmutableText(path: string, value: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  if (existsSync(path)) {
+    const prior = readFileSync(path, 'utf8');
+    if (prior !== value) throw new Error(`Immutable text artifact conflict: ${path}`);
+    return;
+  }
+  writeFileSync(path, value, { flag: 'wx' });
+}
+
+function assertImmutableKernelRevision(project: Project, module: KernelModule, sourceHash: string): void {
+  writeImmutable(join(project.dataRoot, 'kernel-source-registry', safeId(module.kernel_id), `${safeId(module.revision)}.json`), {
+    kernel_ref: { kernel_id: module.kernel_id, revision: module.revision },
+    source_hash: sourceHash,
+    module_ref: `${module.device_file}|${module.host_file}`,
+  });
+}
+
+export async function buildKernel(project: Project, input: BuildKernelInput): Promise<BuildReceipt> {
+  input.signal?.throwIfAborted();
+  assertResearchActive(project, input.research_id, input.experiment_id);
+  const module = readKernelModule(project, input.kernel_path);
+  const rendered = renderSingleKernel(project, module, {
+    assembly_key: `${input.research_id}-${input.experiment_id}-${module.kernel_id}-${module.revision}`,
+  });
+  const source_hash = computeSourceHash(project, module);
+  assertImmutableKernelRevision(project, module, source_hash);
+  const rendered_source_hash = sha256(rendered);
+  const receipt = await selectRunner(project).build({
+    project,
+    research_id: input.research_id,
+    experiment_id: input.experiment_id,
+    module,
+    kernel_path: slash(input.kernel_path),
+    source_hash,
+    rendered_source_hash,
+    rendered_source: rendered,
+    fixture: input.fixture,
+    idempotency_key: input.idempotency_key,
+    signal: input.signal,
+  });
+  input.signal?.throwIfAborted();
+  const path = buildReceiptPath(project, receipt);
+  const ascPath = path.replace(/\.json$/, '.asc');
+  writeImmutableText(ascPath, rendered);
+  const projectRelativeReceipt: BuildReceipt = {
+    ...receipt,
+    source_ref: slash(input.kernel_path),
+    module_ref: `${slash(input.kernel_path)}/kernel.json`,
+  };
+  writeImmutable(path, projectRelativeReceipt);
+  return projectRelativeReceipt;
+}
+
+export function loadBuildReceipt(project: Project, buildRef: string): BuildReceipt {
+  const path = resolveBuildRef(project, buildRef);
+  return readJson<BuildReceipt>(path);
+}
+
+export function resolveBuildRef(project: Project, buildRef: string): string {
+  const resolved = resolve(project.root, buildRef);
+  const dataRoot = resolve(project.dataRoot);
+  const part = relative(dataRoot, resolved);
+  if (part === '..' || part.startsWith('..' + sep) || resolve(part) === part) throw new Error('build_ref must point inside project.dataRoot');
+  return resolved;
+}
+
+export function validateBuildStillFresh(project: Project, build: BuildReceipt): KernelModule {
+  if (build.execution_backend !== project.config.execution.backend) {
+    throw new Error(`Build backend ${build.execution_backend} does not match project backend ${project.config.execution.backend}`);
+  }
+  if (build.environment_ref !== project.config.environment.environment_ref) {
+    throw new Error(`Build environment ${build.environment_ref} does not match project environment ${project.config.environment.environment_ref}`);
+  }
+  if (build.status === 'COMPLETED' && (!build.artifact_hash || !/^[a-f0-9]{64}$/.test(build.artifact_hash))) {
+    throw new Error(`Build receipt ${build.build_id} has an invalid artifact hash`);
+  }
+  const moduleDir = build.module_ref.replace(/\/kernel\.json$/, '');
+  const module = readKernelModule(project, moduleDir);
+  const currentHash = computeSourceHash(project, module);
+  if (currentHash !== build.source_hash) {
+    throw new Error(`Stale build_ref ${build.build_id}: current source hash ${currentHash} does not match receipt ${build.source_hash}`);
+  }
+  if (module.kernel_id !== build.kernel_ref.kernel_id || module.revision !== build.kernel_ref.revision) {
+    throw new Error(`Build receipt kernel ref does not match current module manifest`);
+  }
+  return module;
+}
+
+export function receiptRef(project: Project, path: string): string {
+  return projectRef(project, path);
+}
+
+export function debugCanonical(value: unknown): string {
+  return canonical(value);
+}

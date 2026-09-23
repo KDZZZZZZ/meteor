@@ -1,0 +1,9 @@
+reports/
+.meteor.local.json
+node_modules/
+*.sqlite*
+*.pyc
+__pycache__/
+.env*
+*.pem
+*.key

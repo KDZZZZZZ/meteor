@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.16)
+find_package(ASC REQUIRED)
+project(qmq_remote_harness LANGUAGES ASC CXX)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(NPU_ARCH "dav-2201" CACHE STRING "Architecture confirmed on the target device")
+set(QMQ_KERNEL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/kernel.asc" CACHE FILEPATH "Frozen kernel source to include verbatim")
+get_filename_component(QMQ_KERNEL_PATH "${QMQ_KERNEL_PATH}" ABSOLUTE)
+if(NOT EXISTS "${QMQ_KERNEL_PATH}")
+    message(FATAL_ERROR "Set QMQ_KERNEL_PATH to an existing frozen kernel.asc")
+endif()
+
+add_executable(qmq_remote_main main.asc)
+target_compile_definitions(qmq_remote_main PRIVATE QMQ_KERNEL_HEADER="${QMQ_KERNEL_PATH}")
+target_compile_options(qmq_remote_main PRIVATE $<$<COMPILE_LANGUAGE:ASC>:--npu-arch=${NPU_ARCH}>)
+target_link_libraries(qmq_remote_main PRIVATE tiling_api register platform unified_dlog dl m graph_base)

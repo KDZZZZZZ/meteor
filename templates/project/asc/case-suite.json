@@ -1,0 +1,38 @@
+{
+  "revision": "mock-qmq-v1-suite-0001",
+  "operator_abi": "qmq-v1",
+  "cases": [
+    {
+      "case_id": "qmq_i8_016x032x064",
+      "shape": { "m": 16, "n": 32, "k": 64 },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "mock-input-qmq-i8-016x032x064",
+      "oracle_hash": "mock-oracle-qmq-i8-016x032x064"
+    },
+    {
+      "case_id": "qmq_i8_032x032x064",
+      "shape": { "m": 32, "n": 32, "k": 64 },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "mock-input-qmq-i8-032x032x064",
+      "oracle_hash": "mock-oracle-qmq-i8-032x032x064"
+    },
+    {
+      "case_id": "qmq_i8_064x064x128",
+      "shape": { "m": 64, "n": 64, "k": 128 },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "mock-input-qmq-i8-064x064x128",
+      "oracle_hash": "mock-oracle-qmq-i8-064x064x128"
+    },
+    {
+      "case_id": "qmq_i8_128x064x256",
+      "shape": { "m": 128, "n": 64, "k": 256 },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "mock-input-qmq-i8-128x064x256",
+      "oracle_hash": "mock-oracle-qmq-i8-128x064x256"
+    }
+  ]
+}

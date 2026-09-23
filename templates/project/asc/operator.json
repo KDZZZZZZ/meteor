@@ -1,0 +1,18 @@
+{
+  "operator_abi": "qmq-v1",
+  "operator": "quant_matmul_relu_quant",
+  "inputs": { "x1": "int8[M,K]", "x2": "int8[N,K]", "x1Scale": "float32[M]", "x2Scale": "float32[N]" },
+  "outputs": { "y": "int8[M,N]", "yScale": "float32[M]" },
+  "semantics": [
+    "acc[m,n] = sum_k int32(x1[m,k]) * int32(x2[n,k]); inputs require accumulator in int32 range",
+    "value = float32(acc); value = float32(value * x1Scale[m]); value = float32(value * x2Scale[n]); preserve these staged FP32 operations",
+    "activation = max(value, 0)",
+    "yScale[m] = max_n(activation[m,n]) / 127 if row max > 0, otherwise 1",
+    "y[m,n] = int8(clip(round_to_nearest_even(activation[m,n] / yScale[m]), -128, 127))"
+  ],
+  "case_domain": "positive finite input scales; dimensions and inputs pinned by case-suite.json",
+  "oracle": "tools/meteor/runners/remote/{gen_case.py,verify_case.py}",
+  "correctness": "int8 output exact; yScale rtol=1e-4, atol=1e-4, maximum error fraction=1e-4",
+  "timing": "three warmups and five ACL event samples around run_kernel; excludes input/output transfers; host launcher must synchronize or return appropriate status",
+  "resource_note": "availableCoreNum reports Cube cores. AIV/memory capacity fields 0 mean unknown, never inferred from Cube cores."
+}
