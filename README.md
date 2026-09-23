@@ -34,9 +34,11 @@ meteor targets DSH **0.1.7-alpha.2**. In DSH Web, load the plugin from this repo
 
 The native run starts one spawned research Agent, keeps one session for the whole research loop, registers the two meteor skills into that child session, and accepts only a prepared submission from that same session.
 
+The UI user can give a short goal, such as “Investigate qmq kernel performance within the configured budget.” The existing `meteor-kernel-test` skill contains chief's initialization, startup, waiting and continuation duties. If the directory is not initialized, chief calls `meteor_init` and continues. The native `meteor-skills` integration uses a global provider for bundled defaults and a provider registered in chief's scope when that Agent is created, so current-project skills can take precedence over a parent Git repository's skills. Research children keep their frozen skill layer.
+
 ### Starting A Research Task
 
-Chief chooses the goal, budget, initial materials, and optionally a hypothesis to test. Pass an object to `meteor_start`. Omitting `initial_context` uses the project's freshness-based random sampling:
+Chief chooses the goal, budget, initial materials, and optionally a hypothesis to test. The following are chief tool inputs; users do not need to repeat these operating steps in each UI request. Omitting `initial_context` uses the project's freshness-based random sampling:
 
 ```json
 {
@@ -85,6 +87,14 @@ Use `specified` to distribute selected kernels and knowledge without adding rand
 
 Distributed kernels and knowledge are inspiration. The child can read other materials, choose different implementations, and need not modify a supplied kernel. Each research's `manifest.json` and `seed.json` preserve chief's inputs and the actual distribution. `research_id` and `budget` remain optional; case suite and backend/profile come from project configuration.
 
+### Sustained Research
+
+Chief may inspect a small set of relevant internal files and library evidence, and use available web tools to consult official vendor material before assigning a hypothesis. Once configuration and the research objective are sufficient, it starts promptly instead of exhaustively reading source code or old logs.
+
+For an authorized sustained goal, chief first completes one research to check reliable calls, tool execution, reporting and automatic integration. After that succeeds, it chooses concurrency within the overall budget, each research's budget, and device capacity. It collects the research and integration receipts, evaluates progress toward the overall goal, and starts another distinct research when work and budget remain. Native jobs and available durable goal facilities track this work. Completing one research does not complete the overall goal, and starting another research does not reset its budget. Unknown remote requests must be queried or collected before retrying their work.
+
+Chief decides each start. The plugin creates one child per `meteor_start` and does not recursively create more research Agents. Credentials stay in centralized configuration and are excluded from prompts, task inputs and reports.
+
 ## Execution Backends
 
 meteor starts in mock mode:
@@ -125,7 +135,7 @@ After a valid final submission, meteor automatically consumes the SQLite outbox,
 
 ## Testing Rule For Live DSH Runs
 
-When a live DSH research Agent behaves poorly, improve the relevant meteor skill prompts and rerun the test. Do not feed hints to the running Agent, write its final answer for it, or repair its research result manually.
+Chief may use completed reports and reproducible behavior gaps to improve the existing project persona or either skill, then start future research with the updated snapshot. Keep the current research's snapshot and original evidence intact. Do not feed hints to the running Agent, write its final answer for it, or repair its research result manually. The project retains one persona and two skills.
 
 ## Validation Commands
 
@@ -172,5 +182,7 @@ node --test tests/dsh.test.ts
 ```
 
 The full Web-profile smoke passed against alpha.2 on 2026-09-23. It starts the official Web composition in an isolated temporary `DSH_HOME`, loads Meteor, creates a native chief and research child, and verifies the same child session ID, frozen scoped skills, native structured output, recursive-delegation denial, job cancellation and report delivery. It also checks that the native compaction service is available. The script blocks all model steps and makes zero model requests; it does not perform an actual compaction or run an Ascend operator. User credential files are not copied into the temporary home.
+
+A subsequent native check reproduced missing project skills when the experiment directory was nested beneath another Git root. A stronger check then showed that global provider rank alone cannot override chief's scoped filesystem provider. The correction registers current-project discovery in chief's own scope. The expanded real Web-profile smoke passed with zero model requests: bundled skills load before initialization, current-cwd skills override the parent Git project's skills, `meteor_init` refreshes discovery, and the child's frozen skill bodies remain independent. The project suite passed 96/96 and TypeScript checking passed. These checks do not establish API stability or sustained research performance.
 
 A completed real model-authored operator run is not claimed by these checks. See [DSH compatibility](docs/dsh-compatibility.md) for exact API contracts and verification limits, and [implementation provenance](docs/implementation-provenance.md) for design sources.

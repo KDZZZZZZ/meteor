@@ -1,16 +1,22 @@
 import { MeteorHost } from './host.ts';
 import type { DshContext } from './host.ts';
 import { defineTool, registerResearchTools, string } from './research-tools.ts';
+import { registerChiefSkills } from './skills.ts';
 
 export const name = 'meteor';
 // Web presets mount compaction in each Agent's realm; registries stay host-wide.
 export const inject = ['tools', 'jobs', 'subagents', 'skills'];
 
 export function createHost(ctx: DshContext): MeteorHost {
+  const skills = registerChiefSkills(ctx);
   const host = new MeteorHost(ctx);
-  const disposers = registerResearchTools(ctx, host);
+  const disposers = [skills.dispose, ...registerResearchTools(ctx, host)];
   const definitions = [
-    defineTool('meteor_init', 'Initialize the current project with mock research tools, one persona, two skills, structured evidence storage and Ascend templates. Preserve existing files.', {}, [], (_args, exec) => host.init(exec)),
+    defineTool('meteor_init', 'Initialize the current project with mock research tools, one persona, two skills, structured evidence storage and Ascend templates. Preserve existing files.', {}, [], async (_args, exec) => {
+      const result = await host.init(exec);
+      skills.invalidate();
+      return result;
+    }),
     defineTool('meteor_start', 'Start one continuous hypothesis research Agent as a native background job. Chief decides when and how many research tasks run in parallel.',
       {
         goal: string, research_id: string, budget: { type: 'object', additionalProperties: true },

@@ -25,7 +25,7 @@ function harness() {
   const childReady = deferred(); const final = deferred();
   const chief = { id: 'chief-test', session: { id: 'chief-test', header: { cwd: root } }, ctx: { compaction: {}, skills: {} } };
   const ctx: any = {
-    skills: {},
+    skills: { registerProvider() { return () => {}; } },
     tools: {
       register(tool: any) { assert(!tools.has(tool.name)); tools.set(tool.name, tool); return () => tools.delete(tool.name); },
       get(name: string) { return tools.get(name); },
@@ -310,7 +310,8 @@ test('installed DSH alpha.2 ToolRuntime accepts and executes meteor tool definit
   const ctx = new Context();
   ctx.provide('systemPrompt', { tools() { return () => {}; } });
   new ToolRuntime(ctx, { mode: 'native' });
-  for (const service of ['jobs', 'subagents', 'skills']) ctx.provide(service, {});
+  for (const service of ['jobs', 'subagents']) ctx.provide(service, {});
+  ctx.provide('skills', { registerProvider() { return () => {}; } });
   const plugin = await ctx.plugin(meteor);
   assert.equal(ctx.tools.schemas().filter((tool: any) => tool.name.startsWith('meteor_')).length, 13);
   const failed = await ctx.tools.execute({ name: 'meteor_start', arguments: { goal: 'must require chief' }, callId: 'meteor-smoke', signal: new AbortController().signal });

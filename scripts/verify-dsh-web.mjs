@@ -1,17 +1,21 @@
 // Full official Web composition smoke. No credentials or model requests required.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { initProject } from '../dist/src/init.js';
 
 const modules = resolve(process.argv[2] ?? process.env.METEOR_DSH_MODULE_ROOT ?? '');
 const version = JSON.parse(readFileSync(join(modules, '@deepseek-ai/dsh/package.json'), 'utf8')).version;
 assert.equal(version, '0.1.7-alpha.2');
 const scratch = mkdtempSync(join(tmpdir(), 'meteor-web-contract-'));
 const project = join(scratch, 'project');
-mkdirSync(project); initProject(project, { git: false });
+// Native filesystem discovery stops at the nearest Git root, which may be an
+// ancestor of a Meteor project. The plugin must still advertise its two skills.
+const git = spawnSync('git', ['init', '-b', 'main', scratch], { encoding: 'utf8', windowsHide: true });
+assert.equal(git.status, 0, git.stderr);
+mkdirSync(project);
 process.env.DSH_HOME = join(scratch, 'dsh-home');
 process.env.DSH_TELEMETRY_DISABLED = '1';
 process.chdir(project);
@@ -43,11 +47,25 @@ try {
   const chief = handle.agent;
   const tools = ctx.get('tools');
   const signal = new AbortController().signal;
+  const chiefSkills = chief.ctx.get('skills');
+  const skillOptions = { scope: chief, cwd: project, signal };
+  const bundledSkill = await chiefSkills.get('meteor-kernel-test', skillOptions);
+  assert.equal(bundledSkill?.source, 'bundled', 'An uninitialized project must expose the plugin skill');
+  assert(bundledSkill.content.includes('meteor_init'), 'The entry skill must explain project initialization');
   const call = async (name, args, agent = chief) => {
     const result = await tools.execute({ name, arguments: args, agent, signal, callId: `contract-${name}` });
     assert.equal(result.isError, false, JSON.stringify(result));
     return result.value ?? JSON.parse(result.content.filter(b => b.type === 'text').map(b => b.text).join(''));
   };
+  const parentSkills = join(scratch, '.dsh/skills/meteor-kernel-test');
+  mkdirSync(parentSkills, { recursive: true });
+  writeFileSync(join(parentSkills, 'SKILL.md'), '---\nname: meteor-kernel-test\ndescription: Parent project skill\n---\nPARENT_SKILL_ONLY\n');
+  await call('meteor_init', {});
+  const chiefSkill = await chiefSkills.get('meteor-kernel-test', skillOptions);
+  assert.equal(chiefSkill?.path, join(project, '.dsh/skills/meteor-kernel-test/SKILL.md'));
+  assert(chiefSkill.content.includes('initial_context'), 'Chief must discover the nested project skill after initialization');
+  assert(!chiefSkill.content.includes('PARENT_SKILL_ONLY'), 'The current Meteor project must beat the parent Git root');
+  assert(tools.schemas(chief).some(tool => tool.name === 'meteor_start'), 'Chief must receive the native start tool schema');
   let childResolve;
   const childReady = new Promise(resolveChild => { childResolve = resolveChild; });
   const stepGate = new Promise(resolveGate => { releaseStep = resolveGate; });
@@ -85,6 +103,9 @@ try {
   assert.equal(material.text, readFileSync(join(project, 'asc/operator.json'), 'utf8'));
   const skill = await child.ctx.get('skills').get('meteor-kernel-test', { scope: child, cwd: project, signal });
   assert(skill?.path?.includes('snapshot'), 'Child must load its frozen runtime skill');
+  writeFileSync(chiefSkill.path, readFileSync(chiefSkill.path, 'utf8') + '\nFUTURE_RESEARCH_INSTRUCTION\n');
+  assert((await chiefSkills.get('meteor-kernel-test', skillOptions)).content.includes('FUTURE_RESEARCH_INSTRUCTION'));
+  assert(!(await child.ctx.get('skills').get('meteor-kernel-test', { scope: child, cwd: project, signal })).content.includes('FUTURE_RESEARCH_INSTRUCTION'), 'Prompt updates must preserve the active research snapshot');
   assert(presets.serviceFor(child, 'compaction'), 'Native child compaction must remain available');
   assert(tools.get('structured_output', child), 'Native structured final output must be available');
   const denied = await tools.execute({ name: 'subagent', arguments: { description: 'Blocked recursive delegation', prompt: 'Must never run' }, agent: child, signal, callId: 'contract-denied-delegation' });
@@ -103,7 +124,7 @@ try {
   const delivered = result.result ?? JSON.stringify(chiefMessages);
   assert.match(delivered, /hypothesis_verdict/);
   assert(delivered.includes(child.id));
-  console.log(JSON.stringify({ version, verified: ['web-preset', 'chief-assigned-context', 'scoped-skills', 'native-compaction', 'same-session-subagent', 'structured-output', 'job-cancel', 'job-result'], model_requests: 0 }));
+  console.log(JSON.stringify({ version, verified: ['web-preset', 'chief-skill-discovery', 'init-catalog-refresh', 'nested-project-overrides', 'chief-assigned-context', 'scoped-skills', 'frozen-prompt-snapshot', 'native-compaction', 'same-session-subagent', 'structured-output', 'job-cancel', 'job-result'], model_requests: 0 }));
 } finally {
   releaseStep?.();
   await handle?.dispose();
