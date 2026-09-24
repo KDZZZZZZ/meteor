@@ -116,6 +116,11 @@ function issueCode(code: string) {
   return (error: unknown) => error instanceof SubmissionValidationError && error.issues.some(issue => issue.code === code);
 }
 
+function assignedHypothesisIssue(error: unknown) {
+  if (!(error instanceof SubmissionValidationError)) return undefined;
+  return error.issues.find(issue => issue.code === 'ASSIGNED_HYPOTHESIS_MISSING');
+}
+
 test('the chief supplied hypothesis can remain current, with unspecified fields completed by the researcher', t => {
   const env = setup(t, { statement: assigned.statement });
   const submission = env.submission();
@@ -128,10 +133,25 @@ test('the chief supplied hypothesis can remain current, with unspecified fields 
 
 test('submission cannot omit the chief hypothesis or alter any supplied field', t => {
   const env = setup(t);
-  assert.throws(() => prepareSubmission(env.project, env.submission(env.revised())), issueCode('ASSIGNED_HYPOTHESIS_MISSING'));
+  assert.throws(() => prepareSubmission(env.project, env.submission(env.revised())), error => {
+    const issue = assignedHypothesisIssue(error);
+    assert.ok(issue);
+    assert.match(issue.message, /hypothesis.statement expected/);
+    assert.match(issue.message, /large-to-small latency ratio below 1\.5/);
+    assert.match(issue.message, /large-to-small latency ratio below 2\.5/);
+    return true;
+  });
   for (const [key, value] of Object.entries(assigned)) {
-    const altered = { ...env.original(), [key]: Array.isArray(value) ? [...value, 'altered criterion'] : value + ' altered' };
-    assert.throws(() => prepareSubmission(env.project, env.submission(altered)), issueCode('ASSIGNED_HYPOTHESIS_MISSING'), key);
+    const alteredValue = Array.isArray(value) ? [...value, 'altered criterion'] : value + ' altered';
+    const altered = { ...env.original(), [key]: alteredValue };
+    assert.throws(() => prepareSubmission(env.project, env.submission(altered)), error => {
+      const issue = assignedHypothesisIssue(error);
+      assert.ok(issue, key);
+      assert.ok(issue.message.includes(`hypothesis.${key} expected`), key);
+      assert.ok(issue.message.includes(JSON.stringify(value)), key);
+      assert.ok(issue.message.includes(JSON.stringify(alteredValue)), key);
+      return true;
+    }, key);
   }
 });
 

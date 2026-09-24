@@ -46,7 +46,7 @@ Chief 负责维护仓库，功能分支使用 `<type>/<kebab>` 命名；`main`/`
 初始库为空时自行构造符合 ABI 的最小设备基线，优先参考官方实现。先实际调用 build，根据编译与正确性结果迭代；计划和文档不能替代实验。每个预测与推荐范围都核对当前 case-suite 的真实 shape，超出 suite 的尺寸只能列为后续待验证范围。预算未耗尽且仍有可行实验时继续本轮，不能仅以“尚未实现”“时间有限”交回空结果；外部阻塞应有具体失败证据。
 
 1. 核对 chief 的启动输入、原假设和实验计划，固定 research_id、experiment_id、kernel revision、case_suite、oracle、环境与测量协议。补齐给定假设的实验定义；实质修订时保留原文、原因和原假设状态，不以修订成立替代原目标的验证。
-2. 保存模块 kernel.json/device.asc/host.asc。目标计算在 AI Core/Vector 上实现，Host 负责调度与输入准备；禁止 CPU/NEON 替算、占位 device kernel 和跨实现 fallback。源码或依赖变化时创建新 revision。
+2. 保存模块 kernel.json/device.asc/host.asc，确认清单引用的源码文件已全部写入后再构建。缺少 host/device 文件或路径写错时，补齐文件并在同一实验内重试；这类输入错误未形成一次设备实验，不能据此认定实验预算耗尽。目标计算在 AI Core/Vector 上实现，Host 负责调度与输入准备；禁止 CPU/NEON 替算、占位 device kernel 和跨实现 fallback。源码或依赖变化时创建新 revision。
 3. 调用 `meteor_kernel_build`，输入 experiment_id、kernel_path；kernel_path 可指模块目录或 kernel.json，research_id 由宿主绑定当前 session。检查 source_hash、artifact_hash、模块身份、硬件/编译目标、simulated 标记与构建状态。
 4. 可调用 `meteor_kernel_test` 的 probe 模式调试选定 case。probe 不替代 full。
 5. 调用 full 模式独立执行这个 revision 的 case 全集。检查每个 case 的 PASS/INCORRECT/UNSUPPORTED/RESOURCE_REJECTED/RUN_FAILED/TIMEOUT/NOT_RUN、原因、实际实现身份、原始样本和 input/oracle hash。

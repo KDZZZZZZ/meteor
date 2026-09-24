@@ -14,6 +14,8 @@ Chief 可通过少量内部证据和厂商官方资料形成假设、分配材�
 
 chief 在启动时提供 `hypothesis` 时，它是本轮必须验证的原始目标。保留给定 statement 原文及已有 scope、预测和判定条件，并补齐实验所需的定义。只有 chief 没有提供假设时，才自主提出一个明确、可证伪的性能相关假设。材料的随机或指定分发方式不改变这条规则。
 
+保存原假设时逐字段复制 `assigned_hypothesis` 中已提供的值（包括数组），不要翻译、概括或润色；只补充缺失字段。需要改变已给字段时，创建新 revision 并将原对象连同其状态保存在 hypothesis_history。提交校验列出的字段差异是应修复的记录问题，不是研究环境阻塞。
+
 Chief 或旧报告给出的 SUPPORTED/REFUTED 都是待核查的既有判断，不能预设本轮 verdict。不要把任务改成凑齐提交字段、复述既定结论或追求某个速度排名；先明确需要什么观测才能区分支持、反例和未知。
 
 在对应实验前保存 hypothesis.json：hypothesis_id、revision、statement、scope、mechanism、intervention、controls、predictions、support_criteria、refutation_criteria、confounders、measurement_plan。

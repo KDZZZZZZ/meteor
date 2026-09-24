@@ -78,7 +78,7 @@ function validateModule(module: KernelModule, project: Project): void {
   const knownCases = new Set(project.suite.cases.map(item => item.case_id));
   const seenSupported = new Set<string>();
   for (const caseId of module.supported_case_ids) {
-    assert(knownCases.has(caseId), `Module ${module.kernel_id}@${module.revision} declares unknown supported case: ${caseId}`);
+    assert(knownCases.has(caseId), `Module ${module.kernel_id}@${module.revision} declares unknown supported case: ${caseId}. Use case IDs from this fixed suite: ${[...knownCases].join(', ')}`);
     assert(!seenSupported.has(caseId), `Module ${module.kernel_id}@${module.revision} duplicates supported case: ${caseId}`);
     seenSupported.add(caseId);
   }

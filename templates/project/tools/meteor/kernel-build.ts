@@ -105,6 +105,8 @@ export async function buildKernel(project: Project, input: BuildKernelInput): Pr
   input.signal?.throwIfAborted();
   assertResearchActive(project, input.research_id, input.experiment_id);
   const module = readKernelModule(project, input.kernel_path);
+  const missing = [module.device_file, module.host_file].filter(path => typeof path !== 'string' || !existsSync(inside(project.root, path)));
+  if (missing.length) throw new Error(`Kernel source files missing: ${missing.join(', ')}. Write the declared device and host sources, then retry this experiment. No device build or experiment receipt was produced.`);
   assertDeviceKernelSource(project, module);
   const rendered = renderSingleKernel(project, module, {
     assembly_key: `${input.research_id}-${input.experiment_id}-${module.kernel_id}-${module.revision}`,

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import type { KernelModule, Project } from '../templates/project/tools/meteor/contracts.ts';
@@ -109,6 +109,20 @@ test('mock full test writes deterministic complete receipt with explicit unsuppo
   assert.equal(receipt.rows[0].oracle_hash, 'oracle-c1');
   assert.equal(receipt.data_hash, hashObject(receipt.rows));
   assert.equal(receipt.build_ref, buildRef);
+});
+
+test('missing candidate sources report how to repair without consuming an experiment', async () => {
+  const project = makeProject();
+  project.config.budget.max_experiments = 1;
+  activate(project, 'repair-missing-source');
+  const hostPath = join(project.root, 'kernels/demo/r1/host.asc');
+  const hostSource = readFileSync(hostPath, 'utf8');
+  rmSync(hostPath);
+  const input = { research_id: 'repair-missing-source', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
+  await assert.rejects(buildKernel(project, input), /source files missing:.*host\.asc.*retry this experiment/);
+  assert.equal(existsSync(join(project.dataRoot, 'research', input.research_id, 'experiments')), false);
+  writeFileSync(hostPath, hostSource);
+  assert.equal((await buildKernel(project, input)).status, 'COMPLETED');
 });
 
 test('probe mode never masquerades as full accounting', async () => {

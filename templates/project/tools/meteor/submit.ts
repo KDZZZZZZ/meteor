@@ -260,8 +260,26 @@ function kernelEvidenceChain(project: Project, kernel: KernelSubmission): Resear
 }
 
 function matchesAssignedHypothesis(hypothesis: Hypothesis | undefined, assigned: AssignedHypothesis): boolean {
-  return !!hypothesis && Object.entries(assigned).every(([key, value]) => value === undefined
-    || hashObject(hypothesis[key as keyof AssignedHypothesis]) === hashObject(value));
+  return !!hypothesis && assignedHypothesisDiffs(hypothesis, assigned).length === 0;
+}
+
+function assignedHypothesisDiffs(hypothesis: Hypothesis | undefined, assigned: AssignedHypothesis): Array<{ field: string; expected: unknown; actual: unknown }> {
+  if (!hypothesis) return Object.entries(assigned).filter(([, value]) => value !== undefined)
+    .map(([field, expected]) => ({ field, expected, actual: undefined }));
+  return Object.entries(assigned).filter(([field, value]) => value !== undefined
+    && hashObject(hypothesis[field as keyof Hypothesis]) !== hashObject(value))
+    .map(([field, expected]) => ({ field, expected, actual: hypothesis[field as keyof Hypothesis] }));
+}
+
+function assignedHypothesisMissingMessage(entries: Array<{ hypothesis: Hypothesis | undefined; path: string }>, assigned: AssignedHypothesis): string {
+  const candidates = entries.map(entry => ({ ...entry, diffs: assignedHypothesisDiffs(entry.hypothesis, assigned) }))
+    .sort((left, right) => left.diffs.length - right.diffs.length);
+  const closest = candidates[0];
+  const supplied = Object.entries(assigned).filter(([, value]) => value !== undefined)
+    .map(([field, expected]) => `${field}=${JSON.stringify(expected)}`).join('; ');
+  if (!closest) return `the chief assigned hypothesis and every supplied field must be preserved in the current hypothesis or its history; expected supplied fields: ${supplied}`;
+  const differences = closest.diffs.map(diff => `${closest.path}.${diff.field} expected ${JSON.stringify(diff.expected)} but got ${JSON.stringify(diff.actual)}`).join('; ');
+  return `the chief assigned hypothesis and every supplied field must be preserved in the current hypothesis or its history; expected supplied fields: ${supplied}; closest submitted candidate differs: ${differences}`;
 }
 
 function researchGoalHypothesis(project: Project, submission: Submission): Hypothesis | undefined {
@@ -331,7 +349,7 @@ function validateAssignedHypothesis(project: Project, submission: Submission, as
   ];
   const originals = entries.filter(entry => matchesAssignedHypothesis(entry.hypothesis, assigned));
   if (originals.length === 0) {
-    issue(issues, 'hypothesis', 'ASSIGNED_HYPOTHESIS_MISSING', 'the chief assigned hypothesis and every supplied field must be preserved in the current hypothesis or its history');
+    issue(issues, 'hypothesis', 'ASSIGNED_HYPOTHESIS_MISSING', assignedHypothesisMissingMessage(entries, assigned));
     return;
   }
   const originalIdentities = new Set(originals.map(entry => hashObject([entry.hypothesis.hypothesis_id, entry.hypothesis.revision])));
