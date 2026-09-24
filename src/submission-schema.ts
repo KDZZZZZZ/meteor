@@ -84,7 +84,10 @@ const kernelSubmissionSchema = {
     supported_domain: nonEmptyString,
     verified_case_ids: nonEmptyStringList,
     recommended_domain: nonEmptyString,
-    recommended_case_ids: nonEmptyStringList,
+    recommended_case_ids: {
+      ...nonEmptyStringList,
+      description: 'Verified PASS cases where this kernel is eligible for automatic integration. This is an applicability recommendation, not a claim of speedup or a supported hypothesis. A correct baseline may be submitted with explicit performance limitations.',
+    },
     hardware_scope: nonEmptyString,
     resource_constraints: stringList,
     unsupported_cases: stringList,

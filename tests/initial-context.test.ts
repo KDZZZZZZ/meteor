@@ -13,7 +13,7 @@ import { bindResearchSession, createResearch } from '../templates/project/tools/
 import { normalizeInitialContext, sampleMaterials, selectInitialMaterials } from '../templates/project/tools/meteor/sampling.ts';
 import { listJsonFiles, storePaths } from '../templates/project/tools/meteor/store.ts';
 import { commitSubmission, prepareSubmission } from '../templates/project/tools/meteor/submit.ts';
-import { readJson, writeJson } from '../templates/project/tools/meteor/util.ts';
+import { readJson, sha256, writeJson } from '../templates/project/tools/meteor/util.ts';
 
 function tempRoot(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), 'meteor-initial-context-'));
@@ -92,12 +92,43 @@ test('initial context rejects conflicting modes, unknown options, and invalid sa
   const invalid: unknown[] = [
     null, [], 'random', { mode: 'other' }, { mode: 'random', kernel_refs: ['seed_kernel@r1'] }, { mode: 'random', knowledge_refs: ['claim_primary'] },
     { mode: 'random', kernel_refs: null }, { mode: 'random', knowledge_refs: '' },
-    { mode: 'specified', sampling: { count: 1 } }, { mode: 'specified', kernel_refs: [42] }, { mode: 'specified', knowledge_refs: [' '] },
+    { mode: 'specified', kernel_refs: [42] }, { mode: 'specified', knowledge_refs: [' '] },
     { mode: 'random', typo: true }, { mode: 'random', sampling: null }, { mode: 'random', sampling: { typo: 1 } },
+    { mode: 'specified', sampling: null }, { mode: 'specified', sampling: { typo: 1 } },
     ...[{ count: -1 }, { count: 1.5 }, { seed: -1 }, { seed: 0x100000000 }, { seed: 1.5 }, { epsilon: -0.1 }, { epsilon: 1.1 },
-      { lambda: -1 }, { lambda: Infinity }, { tau_hours: 0 }, { tau_hours: NaN }, { count: '2' }].map(sampling => ({ mode: 'random', sampling })),
+      { lambda: -1 }, { lambda: Infinity }, { tau_hours: 0 }, { tau_hours: NaN }, { count: '2' }]
+      .flatMap(sampling => ['random', 'specified'].map(mode => ({ mode, sampling }))),
   ];
   for (const value of invalid) assert.throws(() => normalizeInitialContext(value), JSON.stringify(value));
+  assert.throws(() => normalizeInitialContext({ mode: 'specified', sampling: { invented: 1 } }), /initial_context\.sampling.*invented/);
+  assert.throws(() => normalizeInitialContext({ mode: 'specified', sampling: { tau_hours: 0 } }), /sampling\.tau_hours must be positive/);
+});
+
+test('specified mode ignores valid sampling without replacing refs, drawing materials, or changing defaults', async t => {
+  const env = await setup(t);
+  const context: InitialContext = {
+    mode: 'specified', kernel_refs: ['seed_kernel@r1'], knowledge_refs: ['claim_primary'],
+    sampling: { count: 4, seed: 42, epsilon: 0.1, lambda: 2, tau_hours: 72 },
+  };
+  const original = structuredClone(context);
+  const originalSampling = structuredClone(env.project.config.sampling);
+  const originalConfig = readFileSync(join(env.root, 'meteor.config.json'), 'utf8');
+  const normalized = { mode: 'specified', kernel_refs: ['seed_kernel@r1'], knowledge_refs: ['claim_primary'] };
+  assert.deepEqual(normalizeInitialContext(context), normalized);
+  const selection = selectInitialMaterials(env.project, context);
+  assert.equal(selection.mode, 'specified');
+  assert.deepEqual(selection.initial_context, normalized);
+  assert.deepEqual(selection.selected.map(item => item.material_id), ['seed_kernel@r1', 'claim_primary']);
+  assert.equal(listJsonFiles(join(storePaths(env.project).knowledgeRoot, 'sampling-draws')).length, 0);
+  assert.deepEqual(env.project.config.sampling, originalSampling);
+  assert.equal(readFileSync(join(env.root, 'meteor.config.json'), 'utf8'), originalConfig);
+  assert.deepEqual(context, original);
+  const record = createResearch(env.project, {
+    research_id: 'specified_with_sampling', chief_id: 'chief', agent_session_id: 'pending',
+    goal: 'Use only the specified inspirations', initial_context: context,
+  });
+  assert.deepEqual(record.initial_context, normalized);
+  assert.deepEqual(readJson(join(env.project.dataRoot, 'research', record.research_id, 'manifest.json')).initial_context, normalized);
 });
 
 test('random selections replay from the same library and history without changing project sampling', async t => {
@@ -173,8 +204,28 @@ test('specified kernel directories and knowledge files preserve readable sources
   for (const material of selection.selected) for (const ref of material.source_refs) assert.ok(readFileSync(ref).length > 0);
 });
 
+test('specified raw kernel source files are readable inspiration, not KernelModule manifests', async t => {
+  const env = await setup(t);
+  const outside = tempRoot(t);
+  const rawSource = join(outside, 'kernel_v235_scoped_batched_entries.asc');
+  const sourceText = 'extern "C" __global__ __aicore__ void raw_kernel() {}\n';
+  writeFileSync(rawSource, sourceText);
+  const selection = selectInitialMaterials(env.project, { mode: 'specified', kernel_refs: [rawSource] });
+  assert.equal(selection.selected.length, 1);
+  const [material] = selection.selected;
+  assert.equal(material.kind, 'kernel_source');
+  assert.equal(material.ref, rawSource);
+  assert.deepEqual(material.source_refs, [rawSource]);
+  assert.equal(material.content_hash, sha256(Buffer.from(sourceText)));
+  assert.equal(material.revision, undefined);
+  assert.equal(material.source_hash, undefined);
+  assert.match(material.statement, /kernel_v235_scoped_batched_entries\.asc/);
+});
+
 test('specified selections reject missing references and kernel/knowledge type mismatches', async t => {
   const env = await setup(t);
+  const invalidJson = join(env.root, 'kernels/bad-kernel.json');
+  writeFileSync(invalidJson, '{ not json');
   const invalid: InitialContext[] = [
     { mode: 'specified', kernel_refs: ['missing-kernel'] },
     { mode: 'specified', knowledge_refs: ['missing-note.md'] },
@@ -184,6 +235,7 @@ test('specified selections reject missing references and kernel/knowledge type m
     { mode: 'specified', kernel_refs: [env.knowledgePath] },
     { mode: 'specified', knowledge_refs: [env.kernelPath] },
     { mode: 'specified', knowledge_refs: [env.kernelPath + '/kernel.json'] },
+    { mode: 'specified', kernel_refs: [invalidJson] },
   ];
   for (const context of invalid) assert.throws(() => selectInitialMaterials(env.project, context), JSON.stringify(context));
 });

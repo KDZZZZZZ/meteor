@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import type { InitialContext, KernelModule, Project } from './contracts.ts';
 import { hashObject, readJson, safeId, sha256, writeImmutable } from './util.ts';
 import { type CommitEnvelope, type StoreMaterial, ensureStore, listDbMaterials, listJsonFiles, nowIso, resolveEvidenceRef, storePaths } from './store.ts';
@@ -66,28 +66,33 @@ export function normalizeInitialContext(input?: unknown): InitialContext {
         throw new Error(`random initial_context requires ${key} to be omitted or empty; use specified mode for actual material refs`);
     }
     if (value.sampling === undefined) return { mode };
-    const parameters = objectValue(value.sampling, 'initial_context.sampling');
-    allowedKeys(parameters, ['count', 'seed', 'epsilon', 'lambda', 'tau_hours'], 'initial_context.sampling');
-    const normalizedParameters: NonNullable<InitialContext['sampling']> = {};
-    for (const [key, parameter] of Object.entries(parameters)) {
-      if (parameter === undefined) continue;
-      if (typeof parameter !== 'number' || !Number.isFinite(parameter)) throw new Error(`sampling.${key} must be finite`);
-      if (key === 'count' && (!Number.isSafeInteger(parameter) || parameter < 0)) throw new Error('sampling.count must be a nonnegative safe integer');
-      if (key === 'seed' && (!Number.isInteger(parameter) || parameter < 0 || parameter > 0xffffffff)) throw new Error('sampling.seed must be an unsigned 32-bit integer');
-      if (key === 'epsilon' && (parameter < 0 || parameter > 1)) throw new Error('sampling.epsilon must be between 0 and 1');
-      if (key === 'lambda' && parameter < 0) throw new Error('sampling.lambda must be nonnegative');
-      if (key === 'tau_hours' && parameter <= 0) throw new Error('sampling.tau_hours must be positive');
-      normalizedParameters[key as keyof typeof normalizedParameters] = parameter;
-    }
-    return { mode, sampling: normalizedParameters };
+    return { mode, sampling: normalizeSampling(value.sampling) };
   }
-  if (value.sampling !== undefined && Object.keys(objectValue(value.sampling, 'initial_context.sampling')).length > 0)
-    throw new Error('specified initial_context requires sampling to be omitted or empty; use random mode for sampling parameters');
+  // The explicit mode owns selection. Validate supplied options before ignoring
+  // them so a filled-out tool call cannot replace the user's exact materials.
+  if (value.sampling !== undefined) normalizeSampling(value.sampling);
   const normalized: InitialContext = { mode };
   for (const key of ['kernel_refs', 'knowledge_refs'] as const) {
     if (value[key] === undefined) continue;
     if (!Array.isArray(value[key]) || value[key].some((ref: unknown) => typeof ref !== 'string' || !ref.trim())) throw new Error(`${key} must contain nonempty strings`);
     normalized[key] = [...new Set((value[key] as string[]).map(ref => ref.trim()))];
+  }
+  return normalized;
+}
+
+function normalizeSampling(input: unknown): NonNullable<InitialContext['sampling']> {
+  const parameters = objectValue(input, 'initial_context.sampling');
+  allowedKeys(parameters, ['count', 'seed', 'epsilon', 'lambda', 'tau_hours'], 'initial_context.sampling');
+  const normalized: NonNullable<InitialContext['sampling']> = {};
+  for (const [key, parameter] of Object.entries(parameters)) {
+    if (parameter === undefined) continue;
+    if (typeof parameter !== 'number' || !Number.isFinite(parameter)) throw new Error(`sampling.${key} must be finite`);
+    if (key === 'count' && (!Number.isSafeInteger(parameter) || parameter < 0)) throw new Error('sampling.count must be a nonnegative safe integer');
+    if (key === 'seed' && (!Number.isInteger(parameter) || parameter < 0 || parameter > 0xffffffff)) throw new Error('sampling.seed must be an unsigned 32-bit integer');
+    if (key === 'epsilon' && (parameter < 0 || parameter > 1)) throw new Error('sampling.epsilon must be between 0 and 1');
+    if (key === 'lambda' && parameter < 0) throw new Error('sampling.lambda must be nonnegative');
+    if (key === 'tau_hours' && parameter <= 0) throw new Error('sampling.tau_hours must be positive');
+    normalized[key as keyof typeof normalized] = parameter;
   }
   return normalized;
 }
@@ -155,6 +160,7 @@ function resolveSpecifiedMaterial(project: Project, materials: StoreMaterial[], 
   if (category === 'kernel' && statSync(path).isDirectory()) path = materialPath(project, join(path, 'kernel.json'));
   if (!statSync(path).isFile()) throw new Error(`Initial ${category} ref must resolve to a file: ${ref}`);
   if (category === 'kernel') {
+    if (isKernelSourceFile(path)) return rawKernelSourceMaterial(path);
     const { module, sourceRefs } = kernelSources(project, path);
     return {
       material_id: `${module.kernel_id}@${module.revision}`, kind: 'kernel', ref: path,
@@ -172,6 +178,19 @@ function resolveSpecifiedMaterial(project: Project, materials: StoreMaterial[], 
   return {
     material_id: `file_${hashObject(path).slice(0, 24)}`, kind: 'document', ref: path,
     statement: basename(path), scope: 'Specified knowledge file', source_refs: [path], content_hash: sha256(readFileSync(path)),
+  };
+}
+
+function isKernelSourceFile(path: string): boolean {
+  return new Set(['.asc', '.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp']).has(extname(path).toLowerCase());
+}
+
+function rawKernelSourceMaterial(path: string): InitialMaterial {
+  const content = readFileSync(path);
+  return {
+    material_id: `kernel_source_${hashObject(path).slice(0, 24)}`, kind: 'kernel_source', ref: path,
+    statement: `Raw kernel source: ${basename(path)}`, scope: 'Specified read-only kernel source file',
+    source_refs: [path], content_hash: sha256(content),
   };
 }
 

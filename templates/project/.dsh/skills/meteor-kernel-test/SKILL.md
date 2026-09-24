@@ -1,11 +1,22 @@
 ---
 name: meteor-kernel-test
-description: meteor 研究入口与单 kernel 测试。Chief 初始化后调试真实设备、生成硬件报告并启动研究；原研究 Agent 自主构建和全尺寸测试每个交付 revision，核对设备执行与计时范围。
+description: 用户要求写算子、优化 kernel 或开展实验时使用。Chief 的主要责任是尽快用 meteor_start 启动并管理研究 subagent；必要时先初始化和准备真实设备。Subagent 负责源码、构建、全尺寸测试与性能实验。
 ---
 
 # 单 kernel 测试
 
-## Chief：配置并启动研究
+## Chief：启动并管理研究 subagent
+
+**你的主要责任是把用户的算子目标交给研究 subagent 执行，并管理其进度和结果。** 算子实现、编译修复、正确性调试、全尺寸测试和性能实验由研究 subagent 完成。你负责用户沟通、必要的设备配置、启动任务、收取报告与维护仓库。
+
+收到写算子、优化 kernel 或做实验的请求，按以下最短路径行动：
+
+1. 工程未初始化就 `meteor_init`；已有工程读取当前配置及硬件就绪状态。报告有效且环境未变时直接使用；尚未就绪才自动探测并处理具体故障。
+2. 保留用户目标和约束。用户提到现有文件时，先用文件搜索解析为真实可读的绝对路径，再作为材料引用传入；只有文件名时不能假定它在本工程根目录。当前目录或 Git 仓库内未找到时，沿已知项目的上级目录按文件名搜索，并检查用户明确给出的其他路径；一次局部搜索无结果不代表文件不存在或不可访问。材料只是启发时，缺旧文件可由 subagent 独立实现；目标专门针对该文件时才需要补足真实文件。
+3. 条件满足就调用 `meteor_start({goal})`。默认即可随机分发初始材料并让 subagent 提出假设；你已有具体假设或用户指定材料时再传相应参数。形成完整假设、寻找现成基线和阅读全部代码都不是默认启动前置步骤。
+4. 用原生 job 等待和收取报告、自动集成回执。核对用户目标是否达成；仍有已授权工作时，依据报告改进未来提示词和安排后续研究。
+
+在没有明确外部阻塞的情况下，本次处理算子目标应实际发出研究任务。不要以建议用户稍后启动、仅完成设备报告或由你自己开展 kernel 实验作为交付。用户限制研究数量时遵守该数量；每个研究内部沿用正常多次实验预算。
 
 用户只需给出研究目标，以下操作由 Chief 自动完成，无须用户在聊天里重复操作步骤。工程尚未初始化时，自行调用 `meteor_init`。读取 `meteor.config.json`、存在时读取 `.meteor.local.json`，并读取 `asc/operator.json`；以合并后的配置为准。初始化不代表设备就绪，不使用默认 mock、示例芯片、假定核数/内存或占位编译目标来启动真实研究。
 
@@ -20,6 +31,8 @@ description: meteor 研究入口与单 kernel 测试。Chief 初始化后调试�
 Chief 可为本轮目标读取少量相关库证据、内部文件，并通过可用的 web 搜索/读取工具查阅厂商官方资料，提出可证伪假设。已有足够证据形成可执行研究时就启动；后续检索围绕报告中的具体缺口。把来源和适用范围随材料引用交给研究 Agent。
 
 调用 `meteor_start` 时传入 `goal`，可带 `research_id` 和 `budget`。通过 `initial_context` 选择本轮初始材料：省略时默认按原新鲜度策略随机分发；`{mode:'random',sampling:{count,seed,epsilon,lambda,tau_hours}}` 中的抽样参数均可选，仅对本轮生效；`{mode:'specified',kernel_refs:[...],knowledge_refs:[...]}` 按指定引用分发，不混入随机材料。引用支持库材料 ID、`sqlite://kind/id` 或文件/模块路径；使用已存在的材料引用。
+
+指定模式只传 `mode` 和需要的引用，省略 `sampling`；若调用中仍携带合法抽样参数，工具会明确报告忽略这些参数，只分发指定材料。原始源码文件可作为只读启发材料，须使用已确认的路径；构建回执、错误日志和报告放入 `knowledge_refs`。参数错误时保留用户的指定材料并按诊断修正，不能为启动成功而改成空随机材料。实际有效分发以返回的 seed/manifest 为准。
 
 用户限制“一轮”或“一个研究任务”约束的是 `meteor_start` 次数，不是实验次数。研究内部需要对照、干预与修复迭代；用户未另限实验预算时沿用项目默认值，不据此将 `max_experiments` 缩成 1。
 
@@ -49,13 +62,13 @@ Chief 负责维护仓库，功能分支使用 `<type>/<kebab>` 命名；`main`/`
 2. 保存模块 kernel.json/device.asc/host.asc，确认清单引用的源码文件、launcher 函数、设备计算及 launch 调用均已实际实现后再构建。只含 TODO/注释的文件仍是未实现，不能靠它制造编译失败作为停止依据。缺少 host/device 文件或路径写错时，补齐文件并在同一实验内重试；这类输入错误未形成一次设备实验，不能据此认定实验预算耗尽。目标计算在 AI Core/Vector 上实现，Host 负责调度与输入准备；禁止 CPU/NEON 替算、占位 device kernel 和跨实现 fallback。源码或依赖变化时创建新 revision。
 3. 调用 `meteor_kernel_build`，输入 experiment_id、kernel_path；kernel_path 可指模块目录或 kernel.json，research_id 由宿主绑定当前 session。检查 source_hash、artifact_hash、模块身份、硬件/编译目标、simulated 标记与构建状态。
 
-   构建失败时读取诊断和 raw_receipt_ref，修复第一处具体错误并以新 revision 重建。例如 launcher 未声明时实现清单声明的 ABI 函数和实际设备调用；这是候选代码的开发工作，不能报告成工具链不支持该算子。预算还有余量时继续迭代。
+   首次编写和遇到编译/正确性障碍时阅读 [Ascend 编写与编译诊断](references/ascend-authoring.md)。构建失败时读取诊断和 raw_receipt_ref，修复第一处具体错误并以新 revision 重建。例如 launcher 未声明时实现清单声明的 ABI 函数和实际设备调用，纯标量 kernel 无法推导执行类型时检查显式类型属性；这是候选代码的开发工作。预算还有余量且有可执行修复时，在当前 session 继续迭代，不用多次不同编译错误推导工具链不支持该算子。
 4. 可调用 `meteor_kernel_test` 的 probe 模式调试选定 case。probe 不替代 full。
 5. 调用 full 模式独立执行这个 revision 的 case 全集。检查每个 case 的 PASS/INCORRECT/UNSUPPORTED/RESOURCE_REJECTED/RUN_FAILED/TIMEOUT/NOT_RUN、原因、实际实现身份、原始样本和 input/oracle hash。
 6. UNSUPPORTED 是显式终态，不运行其它 kernel 代替。正确性通过且有效执行才能记录计时。accounting_complete 与支持/计时 case 数量分别核对。“全尺寸”是固定 suite 全集；它不覆盖未列出的 shape，不能将几个离散 case 写成其整个包围区间已验证。
 7. 源码/ELF、环境、suite、协议与提交必须一致。只能引用当前研究、同一 subagent 会话中身份匹配的历史 full 数据；计时可比性或配对要求不足时重新测量。
 8. 失败结果保留为实验材料；编译/测量失败不等于假设被证伪。你可以分析、修复或新增实验。
-9. 最终交付的每个 kernel 都由编写者在提交前测完并提交完整数据，不能把责任移交 chief。准备交付失败时回到本 skill 补齐。`meteor_prepare_submission` 使用完整工具 schema，研究身份自动绑定；实验要关联 hypothesis revision。最终报告使用准备结果返回的被测模块、完整测量与报告引用，不根据目录名称重建链接。
+9. 最终交付的每个 kernel 都由编写者在提交前测完并提交完整数据，不能把责任移交 chief。已验证正确的基线可在明确性能限制后交付，推荐 case 表示允许自动集成考虑的适用范围，不表示已证实加速。缺少有效性能对照时报告未知，不把错误实现的时间当成回退依据。准备交付失败时回到本 skill 补齐。`meteor_prepare_submission` 使用完整工具 schema，研究身份自动绑定；实验要关联 hypothesis revision。最终报告使用准备结果返回的被测模块、完整测量与报告引用，不根据目录名称重建链接。
 
 ## 设备执行与计时检查
 

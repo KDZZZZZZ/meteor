@@ -112,7 +112,10 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
         const path = resolve(state ? host.requireResearch(exec).project.root : host.root(host.chief(exec)), args.path);
         if (lstatSync(path).isDirectory()) return { path, entries: readdirSync(path, { withFileTypes: true }).map(d => ({ name: d.name, directory: d.isDirectory() })) };
         const content = readFileSync(path, 'utf8'); const offset = args.offset ?? 0; const limit = args.limit ?? 30000;
-        return { path, offset, total_characters: content.length, text: content.slice(offset, offset + limit) };
+        const text = content.slice(offset, offset + limit);
+        const next = offset + text.length;
+        const truncated = next < content.length;
+        return { path, offset, offset_unit: 'characters', total_characters: content.length, text, truncated, next_offset: truncated ? next : null };
       }),
     defineTool('meteor_write_file', 'Write this research’s hypothesis, plans, drafts, analysis or memory. Prefer research-relative paths such as hypothesis.json or drafts/k/r1/device.asc; project-relative and absolute paths to the same writable research area are also accepted. Tool-produced evidence, snapshots and shared files are immutable here.',
       { path: string, content: { type: 'string' }, mode: { type: 'string', enum: ['write', 'append'] } }, ['path', 'content'], (args, exec) => {

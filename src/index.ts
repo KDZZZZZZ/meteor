@@ -19,14 +19,14 @@ export function createHost(ctx: DshContext): MeteorHost {
     }),
     defineTool('meteor_hardware_probe', 'Chief: discover and validate the real SSH device, compiler, launch, correctness and profiler support; save a hardware report and configure the project only when ready. Resolve diagnostics and re-probe if blocked. Uses only centralized SSH profiles.',
       { profile_ref: { type: 'string', description: 'Central SSH profile reference. Omit or leave empty to discover the existing configured profile automatically. Never invent a reference.' } }, [], (args, exec) => host.hardware(args, exec)),
-    defineTool('meteor_start', 'Start one continuous hypothesis research Agent as a native background job. Chief decides when and how many research tasks run in parallel.',
+    defineTool('meteor_start', 'Chief: your primary responsibility for operator implementation, kernel optimization and experiments is to delegate through this tool once the project/device is ready. Start one continuous research subagent to propose or test a hypothesis, write/debug kernels and perform its own full tests. A goal alone is sufficient; materials and an assigned hypothesis are optional. Chief manages jobs and results, and decides when/how many research tasks run in parallel.',
       {
         goal: string, research_id: string, budget: { type: 'object', additionalProperties: false,
           description: 'Optional limits for this research; omitted fields use project defaults. One research can contain multiple experiments.',
           properties: { max_experiments: { type: 'integer', minimum: 1 }, max_wall_time_seconds: { type: 'number', exclusiveMinimum: 0 } } },
         initial_context: {
           type: 'object', additionalProperties: false,
-          description: 'Choose freshness-based random materials or explicit kernel/knowledge references. In random mode omit material refs or use empty arrays; in specified mode omit sampling or use an empty object. Materials are inspiration, not access restrictions.',
+          description: 'mode decides material selection. random applies sampling and requires absent or empty material refs. specified selects only the exact kernel/knowledge refs and ignores valid sampling options if supplied; omit sampling when specifying refs. Unknown or invalid sampling options still fail validation. Materials are inspiration, not access restrictions.',
           properties: {
             mode: { type: 'string', enum: ['random', 'specified'] },
             sampling: { type: 'object', additionalProperties: false, properties: {

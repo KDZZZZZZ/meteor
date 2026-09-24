@@ -5,7 +5,9 @@ description: 在原研究会话中分析假设的机制与性能证据，自主�
 
 # 性能与机制分析
 
-## Chief：形成假设并衔接下一轮
+## Chief：围绕 subagent 任务形成假设并衔接下一轮
+
+Chief 的首要工作是用 `meteor_start` 启动和管理研究 subagent。假设研究、写 kernel 与实验由该 subagent 执行。你可以指定已有假设，也可以只给用户目标让它自行提出；先按 `meteor-kernel-test` 的入口完成必要准备并实际启动，再围绕已完成报告安排下一步。内部文件与 web 调研用于帮助任务分发，不要求你在启动前完成算子实现或完整研究。
 
 用户给出目标后，Chief 可读取少量相关内部文件和库证据，使用可用 web 工具检索厂商官方资料，形成有依据的可证伪假设。按 `meteor-kernel-test` 的 Chief 入口初始化，并用 `meteor_hardware_probe` 调试真实设备、读取硬件报告；设备未配置或未就绪时不启动研究。依据足以安排实验时就启动，不穷尽源码或旧日志。可在 `meteor_start` 中用 `hypothesis` 指定本轮要验证的目标，独立搭配随机或指定初始材料；未提供时才由研究 Agent 提出假设。Chief 不能预定 verdict 或要求子 Agent 将旧结论写成 SUPPORTED。
 

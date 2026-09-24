@@ -41,7 +41,7 @@ The UI user can give a short goal, such as “Investigate qmq kernel performance
 
 ### Starting A Research Task
 
-Chief chooses the goal, budget, initial materials, and optionally a hypothesis to test. The following are chief tool inputs; users do not need to repeat these operating steps in each UI request. Omitting `initial_context` uses the project's freshness-based random sampling:
+Chief's primary responsibility is to start and manage research subagents once the project and device are ready. The child owns implementation, debugging, experiments and full testing. A goal is sufficient to start; Chief may also choose a budget, materials or a hypothesis. The following are chief tool inputs; users do not need to repeat these operating steps in each UI request. Omitting `initial_context` uses the project's freshness-based random sampling:
 
 ```json
 {
@@ -67,7 +67,7 @@ Random sampling can be configured for this research without changing the project
 }
 ```
 
-Use `specified` to distribute selected kernels and knowledge without adding random materials. References accept library material IDs, `sqlite://kind/id`, or file/module paths. Replace the example references below with materials present in your project:
+Use `specified` to distribute selected kernels and knowledge without adding random materials. References accept library material IDs, `sqlite://kind/id`, or file/module paths. Raw `.asc` and C/C++ sources are read-only inspiration, not validated kernel modules; logs and reports belong in `knowledge_refs`. Omit sampling in this mode; supplied valid sampling options are ignored, with `ignored_initial_context_fields` in the start result. The result and manifest expose the normalized selection. Replace the example references below with actual readable materials:
 
 ```json
 {

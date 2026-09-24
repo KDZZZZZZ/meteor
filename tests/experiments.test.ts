@@ -153,6 +153,25 @@ test('missing candidate dependency reports how to repair without consuming an ex
   assert.equal((await buildKernel(project, input)).status, 'COMPLETED');
 });
 
+test('unknown supported case ids report valid fixed suite ids without consuming an experiment', async () => {
+  const project = makeProject();
+  project.config.budget.max_experiments = 1;
+  activate(project, 'repair-unknown-case');
+  const manifestPath = join(project.root, 'kernels/demo/r1/kernel.json');
+  const module = JSON.parse(readFileSync(manifestPath, 'utf8')) as KernelModule;
+  module.supported_case_ids = ['c1', 'qmq_i8_16_32_64'];
+  writeFileSync(manifestPath, JSON.stringify(module, null, 2) + '\n');
+  const input = { research_id: 'repair-unknown-case', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
+  await assert.rejects(
+    buildKernel(project, input),
+    /unknown case id\(s\): qmq_i8_16_32_64.*Valid case_ids.*c1.*c2.*legal subset.*No device build or experiment receipt/,
+  );
+  assert.equal(existsSync(join(project.dataRoot, 'research', input.research_id, 'experiments')), false);
+  module.supported_case_ids = ['c2'];
+  writeFileSync(manifestPath, JSON.stringify(module, null, 2) + '\n');
+  assert.equal((await buildKernel(project, input)).status, 'COMPLETED');
+});
+
 test('probe mode never masquerades as full accounting', async () => {
   const project = makeProject();
   activate(project, 'rA');

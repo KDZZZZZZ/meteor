@@ -101,6 +101,24 @@ Required fields mirror the runtime \`KernelModule\` interface:
 - \`hardware_scope\`: concise hardware and shape domain intended for this revision.
 - \`resource_constraints\`: known limits such as memory, alignment, or unsupported shapes.
 
+## Source insertion and ABI ownership
+
+The assembler inserts device_file, then host_file into ONE translation unit.
+The template already defines TensorInfo, TensorGroupInfo, MeteorCall, MeteorShape,
+MeteorResources, MeteorStatus and the external run_kernel entry. Do not redefine
+these in a candidate. host_file implements only the candidate launcher and its
+helpers; the preceding device definition is already visible, so another forward
+declaration is unnecessary. Any declaration you do add must match its definition
+exactly, including types, attributes and linkage.
+
+Launcher signature (replace short_prefix_ with this revision's symbol_prefix):
+
+\`\`\`cpp
+MeteorStatus short_prefix_launch(const MeteorCall& call,
+                                 const MeteorShape& shape,
+                                 const MeteorResources& resources);
+\`\`\`
+
 Read \`operator_contract_ref\`, \`kernel_template_ref\`, and \`case_suite\` from the startup package before writing a candidate.
 Use \`meteor_write_file\` to create sources, \`meteor_kernel_build\` for one exact revision, and \`meteor_kernel_test\` with \`mode: "full"\` before submitting any kernel.
 `;
@@ -186,7 +204,7 @@ export class MeteorHost {
     const initial = await loadProjectRuntime(project);
     const id = args.research_id === undefined ? randomUUID() : checkedId(args.research_id);
     if (this.active.has(id)) throw new Error('Research already has a native run');
-    await initial.research.createResearch(project, {
+    const record = await initial.research.createResearch(project, {
       research_id: id, chief_id: chief.id, agent_session_id: 'pending',
       goal: text(args.goal, 'goal'), ...(args.budget === undefined ? {} : { budget: object(args.budget) }),
       initial_context: args.initial_context,
@@ -212,7 +230,12 @@ export class MeteorHost {
       });
       state.jobId = jobId;
       await runtime.research.updateResearch(project, id, { job_id: jobId });
-      return { research_id: id, job_id: jobId, status: 'STARTING', execution_backend: project.config.execution.backend };
+      return {
+        research_id: id, job_id: jobId, status: 'STARTING', execution_backend: project.config.execution.backend,
+        initial_context: record.initial_context,
+        ...(record.initial_context?.mode === 'specified' && Object.keys(args.initial_context?.sampling ?? {}).length > 0
+          ? { ignored_initial_context_fields: ['sampling'] } : {}),
+      };
     } catch (error) {
       if (state.done) this.cancel(state, 'Job publication failed');
       await this.failure(state, 'FAILED', String(error));
@@ -260,7 +283,7 @@ export class MeteorHost {
         manifest_ref: resolve(runRoot, 'manifest.json'),
         kernel_template_ref: resolve(snapshot, 'asc/kernel_test.asc.tmpl'),
         operator_contract_ref: resolve(snapshot, 'asc/operator.json'),
-        instructions: 'Read the contracts and single-kernel template first. Write kernel modules under your research_directory/drafts. kernel.json device_file and host_file are relative to project_root. Tools bind research/session identity automatically; do not pass extra identity parameters. Report all experiments and final next_steps.',
+        instructions: 'Read the contracts and single-kernel template first. Write kernel modules under your research_directory/drafts. kernel.json device_file and host_file are relative to project_root. The assembler inserts device_file then host_file into one translation unit and already defines all Meteor/Tensor ABI types and run_kernel. Implement only your candidate device functions and prefix+launch; do not redefine template ABI or redeclare device functions with different linkage. Tools bind research/session identity automatically; do not pass extra identity parameters. Report all experiments and final next_steps.',
         execution_backend: state.project.config.execution.backend,
         case_suite: state.project.suite, seed_ref: existsSync(seedPath) ? seedPath : null,
         skills: ['meteor-kernel-test', 'meteor-performance-analysis'],

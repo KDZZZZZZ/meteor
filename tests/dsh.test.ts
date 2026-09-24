@@ -78,6 +78,15 @@ test('chief can read files through meteor_read_file before project initializatio
   const h = harness({ init: false });
   writeFileSync(join(h.root, 'operator.json'), '{"abi":"qmq-v1"}\n');
   assert.equal((await h.call('meteor_read_file', { path: 'operator.json' })).text, '{"abi":"qmq-v1"}\n');
+  const first = await h.call('meteor_read_file', { path: 'operator.json', limit: 8 });
+  assert.equal(first.offset_unit, 'characters');
+  assert.equal(first.text, '{"abi":"');
+  assert.equal(first.truncated, true);
+  assert.equal(first.next_offset, 8);
+  const rest = await h.call('meteor_read_file', { path: 'operator.json', offset: first.next_offset, limit: 100 });
+  assert.equal(rest.text, 'qmq-v1"}\n');
+  assert.equal(rest.truncated, false);
+  assert.equal(rest.next_offset, null);
   await h.host.dispose();
 });
 
@@ -174,6 +183,7 @@ test('chief sampling configuration is pinned per research without changing the p
   const before = readFileSync(configPath, 'utf8');
   const initialContext = { mode: 'random', sampling: { count: 0, seed: 17, epsilon: 1, tau_hours: 24 } };
   const started = await h.call('meteor_start', { research_id: 'configured-sampling', goal: 'Explore a fresh hypothesis', initial_context: initialContext });
+  assert.equal(started.ignored_initial_context_fields, undefined);
   await h.childReady.promise;
   const seed = JSON.parse(readFileSync(join(h.root, 'reports/meteor/mock/research/configured-sampling/seed.json'), 'utf8'));
   assert.equal(seed.mode, 'random');
@@ -185,6 +195,33 @@ test('chief sampling configuration is pinned per research without changing the p
   await h.call('meteor_control', { research_id: 'configured-sampling', action: 'cancel' });
   await h.jobs.get(started.job_id).done;
   await h.host.dispose();
+});
+
+test('specified initial context ignores sampling while preserving exact refs', async () => {
+  const h = harness();
+  writeFileSync(join(h.root, 'knowledge', 'chief-note.md'), 'Specified note fixture\n');
+  const started = await h.call('meteor_start', {
+    research_id: 'specified-sampling',
+    goal: 'Use exact specified material without random sampling',
+    initial_context: { mode: 'specified', sampling: { count: 3, seed: 99 }, knowledge_refs: ['knowledge/chief-note.md'] },
+  });
+  try {
+    assert.deepEqual(started.ignored_initial_context_fields, ['sampling']);
+    assert.deepEqual(started.initial_context, { mode: 'specified', knowledge_refs: ['knowledge/chief-note.md'] });
+    await h.childReady.promise;
+    const manifest = JSON.parse(readFileSync(join(h.root, 'reports/meteor/mock/research/specified-sampling/manifest.json'), 'utf8'));
+    assert.deepEqual(manifest.initial_context, { mode: 'specified', knowledge_refs: ['knowledge/chief-note.md'] });
+    assert.equal('sampling' in manifest.initial_context, false);
+    const seed = JSON.parse(readFileSync(join(h.root, 'reports/meteor/mock/research/specified-sampling/seed.json'), 'utf8'));
+    assert.equal(seed.mode, 'specified');
+    assert.equal(seed.algorithm, 'meteor-specified-v1');
+    assert.deepEqual(seed.initial_context, { mode: 'specified', knowledge_refs: ['knowledge/chief-note.md'] });
+    assert.deepEqual(seed.selected.map((item: any) => item.ref), [join(h.root, 'knowledge/chief-note.md')]);
+  } finally {
+    if (h.host.active.has('specified-sampling')) await h.call('meteor_control', { research_id: 'specified-sampling', action: 'cancel' });
+    await h.jobs.get(started.job_id).done.catch(() => {});
+    await h.host.dispose();
+  }
 });
 
 test('pause and resume wait at native boundaries without disposing or spawning a replacement', async () => {

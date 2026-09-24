@@ -100,6 +100,16 @@ function assertImmutableKernelRevision(project: Project, module: KernelModule, s
   });
 }
 
+function assertKnownSupportedCases(project: Project, module: KernelModule): void {
+  const valid = project.suite.cases.map(item => item.case_id);
+  const validSet = new Set(valid);
+  const supported = Array.isArray(module.supported_case_ids) ? module.supported_case_ids : [];
+  const unknown = supported.filter(id => typeof id !== 'string' || !validSet.has(id)).map(String);
+  if (unknown.length) {
+    throw new Error(`Kernel supported_case_ids include unknown case id(s): ${unknown.join(', ')}. Valid case_ids for suite ${project.suite.revision}: ${valid.join(', ')}. Use a legal subset of the fixed suite; not every case is required. No device build or experiment receipt was produced.`);
+  }
+}
+
 export async function buildKernel(project: Project, input: BuildKernelInput): Promise<BuildReceipt> {
   input = { ...input, kernel_path: projectRef(project, inside(project.root, slash(input.kernel_path).replace(/\/kernel\.json$/, '').replace(/\/$/, ''))) };
   input.signal?.throwIfAborted();
@@ -110,6 +120,7 @@ export async function buildKernel(project: Project, input: BuildKernelInput): Pr
   const declaredSources = [module.device_file, module.host_file, ...module.dependencies.map(dep => dep.path)];
   const missing = declaredSources.filter(path => typeof path !== 'string' || !existsSync(inside(project.root, path)));
   if (missing.length) throw new Error(`Kernel source files missing: ${missing.join(', ')}. Write the declared device, host and dependency sources, then retry this experiment. No device build or experiment receipt was produced.`);
+  assertKnownSupportedCases(project, module);
   assertDeviceKernelSource(project, module);
   const rendered = renderSingleKernel(project, module, {
     assembly_key: `${input.research_id}-${input.experiment_id}-${module.kernel_id}-${module.revision}`,
