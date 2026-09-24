@@ -21,6 +21,8 @@ Chief 可为本轮目标读取少量相关库证据、内部文件，并通过�
 
 调用 `meteor_start` 时传入 `goal`，可带 `research_id` 和 `budget`。通过 `initial_context` 选择本轮初始材料：省略时默认按原新鲜度策略随机分发；`{mode:'random',sampling:{count,seed,epsilon,lambda,tau_hours}}` 中的抽样参数均可选，仅对本轮生效；`{mode:'specified',kernel_refs:[...],knowledge_refs:[...]}` 按指定引用分发，不混入随机材料。引用支持库材料 ID、`sqlite://kind/id` 或文件/模块路径；使用已存在的材料引用。
 
+用户限制“一轮”或“一个研究任务”约束的是 `meteor_start` 次数，不是实验次数。研究内部需要对照、干预与修复迭代；用户未另限实验预算时沿用项目默认值，不据此将 `max_experiments` 缩成 1。
+
 有给定待检验命题时，Chief 同时传入 `hypothesis:{statement,...}`，它可与任一初始材料模式组合。可补充 `scope`、`mechanism`、`intervention`、`controls`、`predictions`、`support_criteria`、`refutation_criteria`、`confounders`、`measurement_plan`；子 Agent 补齐实验定义并验证该原始目标。未提供假设时才由子 Agent 提出。给定假设不能附带必须 SUPPORTED、必须更快或必须交付的结论；已有 verdict 只作历史材料。指定 kernel/知识只作启发，允许继续阅读其他材料、选择其他实现，不要求修改指定 kernel。manifest.json 和 seed.json 保存 Chief 输入与实际分发，用于核对本轮任务。
 
 插件负责创建一个连续 subagent，构建/测试工具负责通过集中 profile 连接 SSH。设备报告有效时，旧研究已经结束便保留其报告并启动独立研究；无需重复无关环境探查。
