@@ -18,6 +18,8 @@ description: 用户要求写算子、优化 kernel 或开展实验时使用。Ch
 
 在没有明确外部阻塞的情况下，本次处理算子目标应实际发出研究任务。不要以建议用户稍后启动、仅完成设备报告或由你自己开展 kernel 实验作为交付。用户限制研究数量时遵守该数量；每个研究内部沿用正常多次实验预算。
 
+启动前核对当前 `case_suite` 的实际清单。新项目默认 192 个固定 shape，M=1～8192、N=1～32769、K=1～8192，分层选点见 `asc/full-size-policy.md`；这是选点包围范围，不是 kernel 的全域支持保证。旧工程仍为 4 个 smoke case 时，明确指出范围；用户要求扩大时，在下一轮前保存新的 suite 文件并更新配置、准备输入/oracle。不要改写进行中的快照或把旧回执扩写为新范围已通过。按新规模配置实验预算，随后及时启动 subagent。
+
 用户只需给出研究目标，以下操作由 Chief 自动完成，无须用户在聊天里重复操作步骤。工程尚未初始化时，自行调用 `meteor_init`。读取 `meteor.config.json`、存在时读取 `.meteor.local.json`，并读取 `asc/operator.json`；以合并后的配置为准。初始化不代表设备就绪，不使用默认 mock、示例芯片、假定核数/内存或占位编译目标来启动真实研究。
 
 **Chief 的设备准备职责：** 首先调用 `meteor_hardware_probe({})` 自动发现已有集中 profile；初始化返回的 `available_profiles` 是真实可用引用。不要根据示例猜 `default` 等名称，不要在已有配置可读时要求用户重复提供 SSH 配置。只有多个可用连接需要选择时传实际存在的 `profile_ref`；出现 unknown reference 时先按工具返回的列表纠正调用。读取返回的硬件报告、能力与 setup 状态，核对实际 SoC/架构、设备映射、核数/内存、健康、工具链、真实设备 kernel 的编译执行与采集结果。失败时根据具体诊断在已授权范围内调试配置并重新探测；确实没有可用连接配置时才指出所需配置项，保持未就绪，不启动研究。不要把端口可达、ACL 初始化或原生 shell 的环境当作插件执行链已通过。报告中的未知能力保留未知，不根据名称或其他机器参数补值。详细检查方法见 [Ascend 测量参考](references/ascend-measurement.md)。
@@ -66,6 +68,8 @@ Chief 负责维护仓库，功能分支使用 `<type>/<kebab>` 命名；`main`/`
 4. 可调用 `meteor_kernel_test` 的 probe 模式调试选定 case。probe 不替代 full。
 5. 调用 full 模式独立执行这个 revision 的 case 全集。检查每个 case 的 PASS/INCORRECT/UNSUPPORTED/RESOURCE_REJECTED/RUN_FAILED/TIMEOUT/NOT_RUN、原因、实际实现身份、原始样本和 input/oracle hash。
 6. UNSUPPORTED 是显式终态，不运行其它 kernel 代替。正确性通过且有效执行才能记录计时。accounting_complete 与支持/计时 case 数量分别核对。“全尺寸”是固定 suite 全集；它不覆盖未列出的 shape，不能将几个离散 case 写成其整个包围区间已验证。
+
+   在 192-case 预设下，少量 probe 或旧 4-case 成绩不能替代本轮 full。根据真实源码/设备限制声明子域，不删大 case、不以虚构 UNSUPPORTED 掩盖错误或超时。full 的耗时和 profiler 成本纳入预算，优先用代表性 probe 排除明显错误。
 7. 源码/ELF、环境、suite、协议与提交必须一致。只能引用当前研究、同一 subagent 会话中身份匹配的历史 full 数据；计时可比性或配对要求不足时重新测量。
 8. 失败结果保留为实验材料；编译/测量失败不等于假设被证伪。你可以分析、修复或新增实验。
 9. 最终交付的每个 kernel 都由编写者在提交前测完并提交完整数据，不能把责任移交 chief。已验证正确的基线可在明确性能限制后交付，推荐 case 表示允许自动集成考虑的适用范围，不表示已证实加速。缺少有效性能对照时报告未知，不把错误实现的时间当成回退依据。准备交付失败时回到本 skill 补齐。`meteor_prepare_submission` 使用完整工具 schema，研究身份自动绑定；实验要关联 hypothesis revision。最终报告使用准备结果返回的被测模块、完整测量与报告引用，不根据目录名称重建链接。

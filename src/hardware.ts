@@ -63,7 +63,7 @@ export async function probeHardware(root: string, profileRef?: string, signal?: 
   writeJson(localPath, local);
   let caseSetup: any = null;
   if (ready) {
-    try { caseSetup = prepareDefaultCases(project); }
+    try { caseSetup = await prepareDefaultCases(project, signal); }
     catch (error) { caseSetup = { error: String(error), action: 'Repair local Python/NumPy or pin a complete case suite, then re-probe.' }; }
   }
   const setupReady = ready && !caseSetup?.error;

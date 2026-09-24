@@ -7,6 +7,21 @@ from pathlib import Path
 import numpy as np
 
 
+_ORACLE_BLOCK_ROWS = 128
+_ORACLE_RHS_BYTES = 64 * 1024 * 1024
+
+
+def _accumulator_dtype(k):
+    # Project-derived exactness bound, not a NumPy accuracy guarantee: INT8
+    # products are integers with absolute value <= 16384. Every partial sum of
+    # at most K products therefore lies in [-K*16384, K*16384]. Binary64 exactly
+    # represents every integer in [-2**53, 2**53], including those products and
+    # partial sums, regardless of their reduction order (also for fused MACs).
+    # NumPy matmul uses optimized BLAS when possible:
+    # https://numpy.org/doc/2.3/reference/generated/numpy.matmul.html
+    return np.float64 if k * 16384 <= 2**53 else np.int64
+
+
 def oracle(x1, x2, x1_scale, x2_scale):
     if x1.dtype != np.int8 or x2.dtype != np.int8 or x1.ndim != 2 or x2.ndim != 2:
         raise ValueError("x1/x2 must be INT8 matrices")
@@ -22,24 +37,43 @@ def oracle(x1, x2, x1_scale, x2_scale):
             and np.all(np.isfinite(x2_scale)) and np.all(x2_scale > 0)):
         raise ValueError("this harness requires positive finite scales")
 
-    accumulator = x1.astype(np.int64) @ x2.astype(np.int64).T
-    bounds = np.iinfo(np.int32)
-    low, high = int(accumulator.min()), int(accumulator.max())
-    if low < bounds.min or high > bounds.max:
-        raise ValueError(f"integer accumulator outside INT32: [{low}, {high}]")
-    # Materialize each FP32 stage separately; do not fuse the two scale products.
-    value = accumulator.astype(np.int32).astype(np.float32)
-    value = np.multiply(value, x1_scale[:, None], dtype=np.float32)
-    value = np.multiply(value, x2_scale[None, :], dtype=np.float32)
-    activation = np.maximum(value, np.float32(0.0))
-    row_max = activation.max(axis=1)
+    accumulator_dtype = _accumulator_dtype(k)
+    # Bound temporary storage independently of M*N. Cache a modest converted
+    # right operand once; larger operands are converted one N slice at a time.
+    # Only the returned INT8 result occupies M*N elements across all row blocks.
+    column_block = min(n, max(1, _ORACLE_RHS_BYTES // (k * 8)))
+    right = x2.astype(accumulator_dtype) if column_block == n else None
+    y = np.empty((m, n), dtype=np.int8)
     scale = np.ones(m, dtype=np.float32)
-    positive = row_max > np.float32(0.0)
-    scale[positive] = np.divide(row_max[positive], np.float32(127.0), dtype=np.float32)
-    if not np.all(np.isfinite(activation)) or not np.all(np.isfinite(scale)) or not np.all(scale > 0):
-        raise ValueError("FP32 overflow or scale underflow outside this generated test domain")
-    quotient = np.divide(activation, scale[:, None], dtype=np.float32)
-    y = np.clip(np.rint(quotient), np.float32(-128.0), np.float32(127.0)).astype(np.int8)
+    bounds = np.iinfo(np.int32)
+    low, high = bounds.max, bounds.min
+    for row_start in range(0, m, _ORACLE_BLOCK_ROWS):
+        rows = slice(row_start, min(m, row_start + _ORACLE_BLOCK_ROWS))
+        left = x1[rows].astype(accumulator_dtype)
+        activation = np.empty((left.shape[0], n), dtype=np.float32)
+        for column_start in range(0, n, column_block):
+            columns = slice(column_start, min(n, column_start + column_block))
+            rhs = right if right is not None else x2[columns].astype(accumulator_dtype)
+            accumulator = np.matmul(left, rhs.T)
+            block_low, block_high = int(accumulator.min()), int(accumulator.max())
+            if block_low < bounds.min or block_high > bounds.max:
+                raise ValueError(f"integer accumulator outside INT32: [{block_low}, {block_high}]")
+            low, high = min(low, block_low), max(high, block_high)
+            # Materialize each FP32 stage separately; do not fuse scale products.
+            value = accumulator.astype(np.int32).astype(np.float32)
+            np.multiply(value, x1_scale[rows, None], out=value, dtype=np.float32)
+            np.multiply(value, x2_scale[None, columns], out=value, dtype=np.float32)
+            np.maximum(value, np.float32(0.0), out=activation[:, columns])
+        row_max = activation.max(axis=1)
+        row_scale = scale[rows]
+        positive = row_max > np.float32(0.0)
+        row_scale[positive] = np.divide(row_max[positive], np.float32(127.0), dtype=np.float32)
+        if not np.all(np.isfinite(activation)) or not np.all(np.isfinite(row_scale)) or not np.all(row_scale > 0):
+            raise ValueError("FP32 overflow or scale underflow outside this generated test domain")
+        np.divide(activation, row_scale[:, None], out=activation, dtype=np.float32)
+        np.rint(activation, out=activation)
+        np.clip(activation, np.float32(-128.0), np.float32(127.0), out=activation)
+        y[rows] = activation.astype(np.int8)
     return y, scale, {"accumulator_min": low, "accumulator_max": high}
 
 
@@ -84,7 +118,7 @@ def generate_case(directory, m, n, k, seed, mode="random"):
         "format_version": 1, "m": m, "n": n, "k": k, "seed": seed, "mode": mode,
         "numpy_version": np.__version__, "rng": "numpy.default_rng / PCG64",
         "int8_range_inclusive": [-128, 127], "scale_uniform_range": [0.001, 0.1],
-        "oracle": "INT64 matmul; assert INT32 range; FP32 cast, multiply token then channel, ReLU, max/127, RNE, clip",
+        "oracle": "Exact integer matmul (FP64 when K*16384<=2**53, otherwise INT64), row-blocked; assert INT32 range; FP32 cast, multiply token then channel, ReLU, max/127, RNE, clip",
         "scale_tolerance": {"rtol": 0.0001, "atol": 0.0001, "max_error_fraction": 0.0001},
         "integer_output_tolerance": 0, **accumulator_range, "files": files,
     }

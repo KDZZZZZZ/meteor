@@ -1,38 +1,3293 @@
 {
-  "revision": "mock-qmq-v1-suite-0001",
+  "revision": "draft-qmq-v1-wide-0001",
   "operator_abi": "qmq-v1",
+  "coverage": {
+    "kind": "finite-stratified-shapes",
+    "policy_ref": "asc/full-size-policy.md",
+    "bounds": {
+      "m": [
+        1,
+        8192
+      ],
+      "n": [
+        1,
+        32769
+      ],
+      "k": [
+        1,
+        8192
+      ]
+    },
+    "source_catalog": "v235_exact.json",
+    "source_sha256": "8cabf3ec986879e7337690323d5ea4bca61bf30fd4c6ccd7558f68bac7a65073",
+    "source_case_count": 542,
+    "pinned_binary_bytes": 211292067,
+    "note": "Coverage bounds are an envelope, not an exhaustive Cartesian product or kernel support claim. The historical catalog supplies part of the selection; long-K and large-matrix points are also added."
+  },
   "cases": [
     {
       "case_id": "qmq_i8_016x032x064",
-      "shape": { "m": 16, "n": 32, "k": 64 },
+      "shape": {
+        "m": 16,
+        "n": 32,
+        "k": 64
+      },
       "dtype": "int8",
       "layout": "qmq-v1",
-      "input_hash": "mock-input-qmq-i8-016x032x064",
-      "oracle_hash": "mock-oracle-qmq-i8-016x032x064"
+      "input_hash": "pending-input-qmq_i8_016x032x064",
+      "oracle_hash": "pending-oracle-qmq_i8_016x032x064",
+      "coverage_group": "smoke",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
     },
     {
       "case_id": "qmq_i8_032x032x064",
-      "shape": { "m": 32, "n": 32, "k": 64 },
+      "shape": {
+        "m": 32,
+        "n": 32,
+        "k": 64
+      },
       "dtype": "int8",
       "layout": "qmq-v1",
-      "input_hash": "mock-input-qmq-i8-032x032x064",
-      "oracle_hash": "mock-oracle-qmq-i8-032x032x064"
+      "input_hash": "pending-input-qmq_i8_032x032x064",
+      "oracle_hash": "pending-oracle-qmq_i8_032x032x064",
+      "coverage_group": "smoke",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
     },
     {
       "case_id": "qmq_i8_064x064x128",
-      "shape": { "m": 64, "n": 64, "k": 128 },
+      "shape": {
+        "m": 64,
+        "n": 64,
+        "k": 128
+      },
       "dtype": "int8",
       "layout": "qmq-v1",
-      "input_hash": "mock-input-qmq-i8-064x064x128",
-      "oracle_hash": "mock-oracle-qmq-i8-064x064x128"
+      "input_hash": "pending-input-qmq_i8_064x064x128",
+      "oracle_hash": "pending-oracle-qmq_i8_064x064x128",
+      "coverage_group": "smoke",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
     },
     {
       "case_id": "qmq_i8_128x064x256",
-      "shape": { "m": 128, "n": 64, "k": 256 },
+      "shape": {
+        "m": 128,
+        "n": 64,
+        "k": 256
+      },
       "dtype": "int8",
       "layout": "qmq-v1",
-      "input_hash": "mock-input-qmq-i8-128x064x256",
-      "oracle_hash": "mock-oracle-qmq-i8-128x064x256"
+      "input_hash": "pending-input-qmq_i8_128x064x256",
+      "oracle_hash": "pending-oracle-qmq_i8_128x064x256",
+      "coverage_group": "smoke",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_001x001x001",
+      "shape": {
+        "m": 1,
+        "n": 1,
+        "k": 1
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_001x001x001",
+      "oracle_hash": "pending-oracle-qmq_i8_001x001x001",
+      "coverage_group": "tiny",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_001x007x031",
+      "shape": {
+        "m": 1,
+        "n": 7,
+        "k": 31
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_001x007x031",
+      "oracle_hash": "pending-oracle-qmq_i8_001x007x031",
+      "coverage_group": "tiny",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_002x002x002",
+      "shape": {
+        "m": 2,
+        "n": 2,
+        "k": 2
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_002x002x002",
+      "oracle_hash": "pending-oracle-qmq_i8_002x002x002",
+      "coverage_group": "tiny",
+      "generation": {
+        "seed": 42,
+        "mode": "zero-row"
+      }
+    },
+    {
+      "case_id": "qmq_i8_003x005x007",
+      "shape": {
+        "m": 3,
+        "n": 5,
+        "k": 7
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_003x005x007",
+      "oracle_hash": "pending-oracle-qmq_i8_003x005x007",
+      "coverage_group": "tiny",
+      "generation": {
+        "seed": 42,
+        "mode": "all-zero"
+      }
+    },
+    {
+      "case_id": "qmq_i8_015x017x033",
+      "shape": {
+        "m": 15,
+        "n": 17,
+        "k": 33
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_015x017x033",
+      "oracle_hash": "pending-oracle-qmq_i8_015x017x033",
+      "coverage_group": "tiny",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_017x015x063",
+      "shape": {
+        "m": 17,
+        "n": 15,
+        "k": 63
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_017x015x063",
+      "oracle_hash": "pending-oracle-qmq_i8_017x015x063",
+      "coverage_group": "tiny",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_015x064x064",
+      "shape": {
+        "m": 15,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_015x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_015x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x064x064",
+      "shape": {
+        "m": 16,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_016x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_017x064x064",
+      "shape": {
+        "m": 17,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_017x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_017x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_031x064x064",
+      "shape": {
+        "m": 31,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_031x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_031x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_032x064x064",
+      "shape": {
+        "m": 32,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_032x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_032x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_033x064x064",
+      "shape": {
+        "m": 33,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_033x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_033x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_063x064x064",
+      "shape": {
+        "m": 63,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_063x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_063x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_064x064x064",
+      "shape": {
+        "m": 64,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_064x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_064x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_065x064x064",
+      "shape": {
+        "m": 65,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_065x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_065x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_079x064x064",
+      "shape": {
+        "m": 79,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_079x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_079x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_080x064x064",
+      "shape": {
+        "m": 80,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_080x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_080x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_081x064x064",
+      "shape": {
+        "m": 81,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_081x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_081x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_127x064x064",
+      "shape": {
+        "m": 127,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_127x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_127x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_128x064x064",
+      "shape": {
+        "m": 128,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_128x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_128x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_129x064x064",
+      "shape": {
+        "m": 129,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_129x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_129x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_255x064x064",
+      "shape": {
+        "m": 255,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_255x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_255x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_256x064x064",
+      "shape": {
+        "m": 256,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_256x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_256x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_257x064x064",
+      "shape": {
+        "m": 257,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_257x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_257x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_511x064x064",
+      "shape": {
+        "m": 511,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_511x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_511x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_512x064x064",
+      "shape": {
+        "m": 512,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_512x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_512x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_513x064x064",
+      "shape": {
+        "m": 513,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_513x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_513x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_1023x064x064",
+      "shape": {
+        "m": 1023,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_1023x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_1023x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_1024x064x064",
+      "shape": {
+        "m": 1024,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_1024x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_1024x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_1025x064x064",
+      "shape": {
+        "m": 1025,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_1025x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_1025x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4095x064x064",
+      "shape": {
+        "m": 4095,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4095x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_4095x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4096x064x064",
+      "shape": {
+        "m": 4096,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4096x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_4096x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4097x064x064",
+      "shape": {
+        "m": 4097,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4097x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_4097x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_8191x064x064",
+      "shape": {
+        "m": 8191,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_8191x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_8191x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_8192x064x064",
+      "shape": {
+        "m": 8192,
+        "n": 64,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_8192x064x064",
+      "oracle_hash": "pending-oracle-qmq_i8_8192x064x064",
+      "coverage_group": "m-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x015x128",
+      "shape": {
+        "m": 16,
+        "n": 15,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x015x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x015x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x016x128",
+      "shape": {
+        "m": 16,
+        "n": 16,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x016x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x016x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x017x128",
+      "shape": {
+        "m": 16,
+        "n": 17,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x017x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x017x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x031x128",
+      "shape": {
+        "m": 16,
+        "n": 31,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x031x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x031x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x032x128",
+      "shape": {
+        "m": 16,
+        "n": 32,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x032x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x032x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x033x128",
+      "shape": {
+        "m": 16,
+        "n": 33,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x033x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x033x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x063x128",
+      "shape": {
+        "m": 16,
+        "n": 63,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x063x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x063x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x064x128",
+      "shape": {
+        "m": 16,
+        "n": 64,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x064x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x064x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x065x128",
+      "shape": {
+        "m": 16,
+        "n": 65,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x065x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x065x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x127x128",
+      "shape": {
+        "m": 16,
+        "n": 127,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x127x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x127x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x128",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x129x128",
+      "shape": {
+        "m": 16,
+        "n": 129,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x129x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x129x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x255x128",
+      "shape": {
+        "m": 16,
+        "n": 255,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x255x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x255x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x256x128",
+      "shape": {
+        "m": 16,
+        "n": 256,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x256x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x256x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x257x128",
+      "shape": {
+        "m": 16,
+        "n": 257,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x257x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x257x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x511x128",
+      "shape": {
+        "m": 16,
+        "n": 511,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x511x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x511x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x512x128",
+      "shape": {
+        "m": 16,
+        "n": 512,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x512x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x512x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x513x128",
+      "shape": {
+        "m": 16,
+        "n": 513,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x513x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x513x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x1023x128",
+      "shape": {
+        "m": 16,
+        "n": 1023,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x1023x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x1023x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x1024x128",
+      "shape": {
+        "m": 16,
+        "n": 1024,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x1024x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x1024x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x1025x128",
+      "shape": {
+        "m": 16,
+        "n": 1025,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x1025x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x1025x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x2047x128",
+      "shape": {
+        "m": 16,
+        "n": 2047,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x2047x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x2047x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x2048x128",
+      "shape": {
+        "m": 16,
+        "n": 2048,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x2048x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x2048x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x2049x128",
+      "shape": {
+        "m": 16,
+        "n": 2049,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x2049x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x2049x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x4095x128",
+      "shape": {
+        "m": 16,
+        "n": 4095,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x4095x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x4095x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x4096x128",
+      "shape": {
+        "m": 16,
+        "n": 4096,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x4096x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x4096x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x4097x128",
+      "shape": {
+        "m": 16,
+        "n": 4097,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x4097x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x4097x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x8191x128",
+      "shape": {
+        "m": 16,
+        "n": 8191,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x8191x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x8191x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x8192x128",
+      "shape": {
+        "m": 16,
+        "n": 8192,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x8192x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x8192x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x8193x128",
+      "shape": {
+        "m": 16,
+        "n": 8193,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x8193x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x8193x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x16383x128",
+      "shape": {
+        "m": 16,
+        "n": 16383,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x16383x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x16383x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x16384x128",
+      "shape": {
+        "m": 16,
+        "n": 16384,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x16384x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x16384x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x16385x128",
+      "shape": {
+        "m": 16,
+        "n": 16385,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x16385x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x16385x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x32767x128",
+      "shape": {
+        "m": 16,
+        "n": 32767,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x32767x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x32767x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x32768x128",
+      "shape": {
+        "m": 16,
+        "n": 32768,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x32768x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x32768x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x32769x128",
+      "shape": {
+        "m": 16,
+        "n": 32769,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x32769x128",
+      "oracle_hash": "pending-oracle-qmq_i8_016x32769x128",
+      "coverage_group": "n-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x015",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 15
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x015",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x015",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x016",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 16
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x016",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x016",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x017",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 17
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x017",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x017",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x031",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 31
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x031",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x031",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x032",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 32
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x032",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x032",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x033",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 33
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x033",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x033",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x063",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 63
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x063",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x063",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x064",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x064",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x064",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x065",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 65
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x065",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x065",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x095",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 95
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x095",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x095",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x096",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 96
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x096",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x096",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x097",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 97
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x097",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x097",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x127",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 127
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x127",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x127",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x129",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 129
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x129",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x129",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x255",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 255
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x255",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x255",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x256",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 256
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x256",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x256",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x257",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 257
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x257",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x257",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x511",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 511
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x511",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x511",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x512",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 512
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x512",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x512",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x513",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 513
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x513",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x513",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x1023",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 1023
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x1023",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x1023",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x1024",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 1024
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x1024",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x1024",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x1025",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 1025
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x1025",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x1025",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x2047",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 2047
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x2047",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x2047",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x2048",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 2048
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x2048",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x2048",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x2049",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 2049
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x2049",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x2049",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x4095",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 4095
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x4095",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x4095",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x4096",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 4096
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x4096",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x4096",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x4097",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 4097
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x4097",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x4097",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x8191",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 8191
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x8191",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x8191",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x128x8192",
+      "shape": {
+        "m": 16,
+        "n": 128,
+        "k": 8192
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x128x8192",
+      "oracle_hash": "pending-oracle-qmq_i8_016x128x8192",
+      "coverage_group": "k-boundary",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_032x064x032",
+      "shape": {
+        "m": 32,
+        "n": 64,
+        "k": 32
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_032x064x032",
+      "oracle_hash": "pending-oracle-qmq_i8_032x064x032",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_128x016x032",
+      "shape": {
+        "m": 128,
+        "n": 16,
+        "k": 32
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_128x016x032",
+      "oracle_hash": "pending-oracle-qmq_i8_128x016x032",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_128x128x128",
+      "shape": {
+        "m": 128,
+        "n": 128,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_128x128x128",
+      "oracle_hash": "pending-oracle-qmq_i8_128x128x128",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_128x129x128",
+      "shape": {
+        "m": 128,
+        "n": 129,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_128x129x128",
+      "oracle_hash": "pending-oracle-qmq_i8_128x129x128",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_256x016x064",
+      "shape": {
+        "m": 256,
+        "n": 16,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_256x016x064",
+      "oracle_hash": "pending-oracle-qmq_i8_256x016x064",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_1280x2048x128",
+      "shape": {
+        "m": 1280,
+        "n": 2048,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_1280x2048x128",
+      "oracle_hash": "pending-oracle-qmq_i8_1280x2048x128",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4096x2048x064",
+      "shape": {
+        "m": 4096,
+        "n": 2048,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4096x2048x064",
+      "oracle_hash": "pending-oracle-qmq_i8_4096x2048x064",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_080x1024x512",
+      "shape": {
+        "m": 80,
+        "n": 1024,
+        "k": 512
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_080x1024x512",
+      "oracle_hash": "pending-oracle-qmq_i8_080x1024x512",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4096x512x160",
+      "shape": {
+        "m": 4096,
+        "n": 512,
+        "k": 160
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4096x512x160",
+      "oracle_hash": "pending-oracle-qmq_i8_4096x512x160",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4096x2048x256",
+      "shape": {
+        "m": 4096,
+        "n": 2048,
+        "k": 256
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4096x2048x256",
+      "oracle_hash": "pending-oracle-qmq_i8_4096x2048x256",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_064x4096x1024",
+      "shape": {
+        "m": 64,
+        "n": 4096,
+        "k": 1024
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_064x4096x1024",
+      "oracle_hash": "pending-oracle-qmq_i8_064x4096x1024",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_256x033x063",
+      "shape": {
+        "m": 256,
+        "n": 33,
+        "k": 63
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_256x033x063",
+      "oracle_hash": "pending-oracle-qmq_i8_256x033x063",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_511x047x065",
+      "shape": {
+        "m": 511,
+        "n": 47,
+        "k": 65
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_511x047x065",
+      "oracle_hash": "pending-oracle-qmq_i8_511x047x065",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_1537x057x097",
+      "shape": {
+        "m": 1537,
+        "n": 57,
+        "k": 97
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_1537x057x097",
+      "oracle_hash": "pending-oracle-qmq_i8_1537x057x097",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4095x061x127",
+      "shape": {
+        "m": 4095,
+        "n": 61,
+        "k": 127
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4095x061x127",
+      "oracle_hash": "pending-oracle-qmq_i8_4095x061x127",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x32769x129",
+      "shape": {
+        "m": 16,
+        "n": 32769,
+        "k": 129
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x32769x129",
+      "oracle_hash": "pending-oracle-qmq_i8_016x32769x129",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_8192x017x1024",
+      "shape": {
+        "m": 8192,
+        "n": 17,
+        "k": 1024
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_8192x017x1024",
+      "oracle_hash": "pending-oracle-qmq_i8_8192x017x1024",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4096x1536x1024",
+      "shape": {
+        "m": 4096,
+        "n": 1536,
+        "k": 1024
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4096x1536x1024",
+      "oracle_hash": "pending-oracle-qmq_i8_4096x1536x1024",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_2048x2048x2048",
+      "shape": {
+        "m": 2048,
+        "n": 2048,
+        "k": 2048
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_2048x2048x2048",
+      "oracle_hash": "pending-oracle-qmq_i8_2048x2048x2048",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4096x4096x4096",
+      "shape": {
+        "m": 4096,
+        "n": 4096,
+        "k": 4096
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4096x4096x4096",
+      "oracle_hash": "pending-oracle-qmq_i8_4096x4096x4096",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_128x128x8192",
+      "shape": {
+        "m": 128,
+        "n": 128,
+        "k": 8192
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_128x128x8192",
+      "oracle_hash": "pending-oracle-qmq_i8_128x128x8192",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_001x4096x4096",
+      "shape": {
+        "m": 1,
+        "n": 4096,
+        "k": 4096
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_001x4096x4096",
+      "oracle_hash": "pending-oracle-qmq_i8_001x4096x4096",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_032x16384x256",
+      "shape": {
+        "m": 32,
+        "n": 16384,
+        "k": 256
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_032x16384x256",
+      "oracle_hash": "pending-oracle-qmq_i8_032x16384x256",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_256x4096x128",
+      "shape": {
+        "m": 256,
+        "n": 4096,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_256x4096x128",
+      "oracle_hash": "pending-oracle-qmq_i8_256x4096x128",
+      "coverage_group": "representative",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_096x240x224",
+      "shape": {
+        "m": 96,
+        "n": 240,
+        "k": 224
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_096x240x224",
+      "oracle_hash": "pending-oracle-qmq_i8_096x240x224",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_304x624x480",
+      "shape": {
+        "m": 304,
+        "n": 624,
+        "k": 480
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_304x624x480",
+      "oracle_hash": "pending-oracle-qmq_i8_304x624x480",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_816x1008x736",
+      "shape": {
+        "m": 816,
+        "n": 1008,
+        "k": 736
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_816x1008x736",
+      "oracle_hash": "pending-oracle-qmq_i8_816x1008x736",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_2032x976x672",
+      "shape": {
+        "m": 2032,
+        "n": 976,
+        "k": 672
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_2032x976x672",
+      "oracle_hash": "pending-oracle-qmq_i8_2032x976x672",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_320x048x064",
+      "shape": {
+        "m": 320,
+        "n": 48,
+        "k": 64
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_320x048x064",
+      "oracle_hash": "pending-oracle-qmq_i8_320x048x064",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_319x249x001",
+      "shape": {
+        "m": 319,
+        "n": 249,
+        "k": 1
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_319x249x001",
+      "oracle_hash": "pending-oracle-qmq_i8_319x249x001",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_321x191x063",
+      "shape": {
+        "m": 321,
+        "n": 191,
+        "k": 63
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_321x191x063",
+      "oracle_hash": "pending-oracle-qmq_i8_321x191x063",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_640x112x032",
+      "shape": {
+        "m": 640,
+        "n": 112,
+        "k": 32
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_640x112x032",
+      "oracle_hash": "pending-oracle-qmq_i8_640x112x032",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_1281x121x001",
+      "shape": {
+        "m": 1281,
+        "n": 121,
+        "k": 1
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_1281x121x001",
+      "oracle_hash": "pending-oracle-qmq_i8_1281x121x001",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_080x176x992",
+      "shape": {
+        "m": 80,
+        "n": 176,
+        "k": 992
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_080x176x992",
+      "oracle_hash": "pending-oracle-qmq_i8_080x176x992",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_641x505x065",
+      "shape": {
+        "m": 641,
+        "n": 505,
+        "k": 65
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_641x505x065",
+      "oracle_hash": "pending-oracle-qmq_i8_641x505x065",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_2560x192x032",
+      "shape": {
+        "m": 2560,
+        "n": 192,
+        "k": 32
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_2560x192x032",
+      "oracle_hash": "pending-oracle-qmq_i8_2560x192x032",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_002x1017x001",
+      "shape": {
+        "m": 2,
+        "n": 1017,
+        "k": 1
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_002x1017x001",
+      "oracle_hash": "pending-oracle-qmq_i8_002x1017x001",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_032x384x160",
+      "shape": {
+        "m": 32,
+        "n": 384,
+        "k": 160
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_032x384x160",
+      "oracle_hash": "pending-oracle-qmq_i8_032x384x160",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_032x768x096",
+      "shape": {
+        "m": 32,
+        "n": 768,
+        "k": 96
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_032x768x096",
+      "oracle_hash": "pending-oracle-qmq_i8_032x768x096",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_321x185x129",
+      "shape": {
+        "m": 321,
+        "n": 185,
+        "k": 129
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_321x185x129",
+      "oracle_hash": "pending-oracle-qmq_i8_321x185x129",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_002x1985x063",
+      "shape": {
+        "m": 2,
+        "n": 1985,
+        "k": 63
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_002x1985x063",
+      "oracle_hash": "pending-oracle-qmq_i8_002x1985x063",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_002x2041x065",
+      "shape": {
+        "m": 2,
+        "n": 2041,
+        "k": 65
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_002x2041x065",
+      "oracle_hash": "pending-oracle-qmq_i8_002x2041x065",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_080x1040x160",
+      "shape": {
+        "m": 80,
+        "n": 1040,
+        "k": 160
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_080x1040x160",
+      "oracle_hash": "pending-oracle-qmq_i8_080x1040x160",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_016x1984x160",
+      "shape": {
+        "m": 16,
+        "n": 1984,
+        "k": 160
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_016x1984x160",
+      "oracle_hash": "pending-oracle-qmq_i8_016x1984x160",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_640x320x160",
+      "shape": {
+        "m": 640,
+        "n": 320,
+        "k": 160
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_640x320x160",
+      "oracle_hash": "pending-oracle-qmq_i8_640x320x160",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_032x16400x128",
+      "shape": {
+        "m": 32,
+        "n": 16400,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_032x16400x128",
+      "oracle_hash": "pending-oracle-qmq_i8_032x16400x128",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_128x4080x512",
+      "shape": {
+        "m": 128,
+        "n": 4080,
+        "k": 512
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_128x4080x512",
+      "oracle_hash": "pending-oracle-qmq_i8_128x4080x512",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_4080x1024x992",
+      "shape": {
+        "m": 4080,
+        "n": 1024,
+        "k": 992
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_4080x1024x992",
+      "oracle_hash": "pending-oracle-qmq_i8_4080x1024x992",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_002x001x129",
+      "shape": {
+        "m": 2,
+        "n": 1,
+        "k": 129
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_002x001x129",
+      "oracle_hash": "pending-oracle-qmq_i8_002x001x129",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_017x001x031",
+      "shape": {
+        "m": 17,
+        "n": 1,
+        "k": 31
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_017x001x031",
+      "oracle_hash": "pending-oracle-qmq_i8_017x001x031",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_017x065x001",
+      "shape": {
+        "m": 17,
+        "n": 65,
+        "k": 1
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_017x065x001",
+      "oracle_hash": "pending-oracle-qmq_i8_017x065x001",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_017x017x065",
+      "shape": {
+        "m": 17,
+        "n": 17,
+        "k": 65
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_017x017x065",
+      "oracle_hash": "pending-oracle-qmq_i8_017x017x065",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_065x001x063",
+      "shape": {
+        "m": 65,
+        "n": 1,
+        "k": 63
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_065x001x063",
+      "oracle_hash": "pending-oracle-qmq_i8_065x001x063",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_002x129x031",
+      "shape": {
+        "m": 2,
+        "n": 129,
+        "k": 31
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_002x129x031",
+      "oracle_hash": "pending-oracle-qmq_i8_002x129x031",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_065x063x001",
+      "shape": {
+        "m": 65,
+        "n": 63,
+        "k": 1
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_065x063x001",
+      "oracle_hash": "pending-oracle-qmq_i8_065x063x001",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_065x007x065",
+      "shape": {
+        "m": 65,
+        "n": 7,
+        "k": 65
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_065x007x065",
+      "oracle_hash": "pending-oracle-qmq_i8_065x007x065",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_002x063x127",
+      "shape": {
+        "m": 2,
+        "n": 63,
+        "k": 127
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_002x063x127",
+      "oracle_hash": "pending-oracle-qmq_i8_002x063x127",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_129x057x001",
+      "shape": {
+        "m": 129,
+        "n": 57,
+        "k": 1
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_129x057x001",
+      "oracle_hash": "pending-oracle-qmq_i8_129x057x001",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_065x065x031",
+      "shape": {
+        "m": 65,
+        "n": 65,
+        "k": 31
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_065x065x031",
+      "oracle_hash": "pending-oracle-qmq_i8_065x065x031",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_129x001x065",
+      "shape": {
+        "m": 129,
+        "n": 1,
+        "k": 65
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_129x001x065",
+      "oracle_hash": "pending-oracle-qmq_i8_129x001x065",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_641x007x001",
+      "shape": {
+        "m": 641,
+        "n": 7,
+        "k": 1
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_641x007x001",
+      "oracle_hash": "pending-oracle-qmq_i8_641x007x001",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_017x057x127",
+      "shape": {
+        "m": 17,
+        "n": 57,
+        "k": 127
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_017x057x127",
+      "oracle_hash": "pending-oracle-qmq_i8_017x057x127",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_080x016x096",
+      "shape": {
+        "m": 80,
+        "n": 16,
+        "k": 96
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_080x016x096",
+      "oracle_hash": "pending-oracle-qmq_i8_080x016x096",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_065x017x127",
+      "shape": {
+        "m": 65,
+        "n": 17,
+        "k": 127
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_065x017x127",
+      "oracle_hash": "pending-oracle-qmq_i8_065x017x127",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_129x063x031",
+      "shape": {
+        "m": 129,
+        "n": 63,
+        "k": 31
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_129x063x031",
+      "oracle_hash": "pending-oracle-qmq_i8_129x063x031",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_081x016x160",
+      "shape": {
+        "m": 81,
+        "n": 16,
+        "k": 160
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_081x016x160",
+      "oracle_hash": "pending-oracle-qmq_i8_081x016x160",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_129x007x127",
+      "shape": {
+        "m": 129,
+        "n": 7,
+        "k": 127
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_129x007x127",
+      "oracle_hash": "pending-oracle-qmq_i8_129x007x127",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_065x057x128",
+      "shape": {
+        "m": 65,
+        "n": 57,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_065x057x128",
+      "oracle_hash": "pending-oracle-qmq_i8_065x057x128",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_080x048x128",
+      "shape": {
+        "m": 80,
+        "n": 48,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_080x048x128",
+      "oracle_hash": "pending-oracle-qmq_i8_080x048x128",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_129x065x063",
+      "shape": {
+        "m": 129,
+        "n": 65,
+        "k": 63
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_129x065x063",
+      "oracle_hash": "pending-oracle-qmq_i8_129x065x063",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_319x057x031",
+      "shape": {
+        "m": 319,
+        "n": 57,
+        "k": 31
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_319x057x031",
+      "oracle_hash": "pending-oracle-qmq_i8_319x057x031",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_080x256x032",
+      "shape": {
+        "m": 80,
+        "n": 256,
+        "k": 32
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_080x256x032",
+      "oracle_hash": "pending-oracle-qmq_i8_080x256x032",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_128x048x160",
+      "shape": {
+        "m": 128,
+        "n": 48,
+        "k": 160
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_128x048x160",
+      "oracle_hash": "pending-oracle-qmq_i8_128x048x160",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_641x017x031",
+      "shape": {
+        "m": 641,
+        "n": 17,
+        "k": 31
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_641x017x031",
+      "oracle_hash": "pending-oracle-qmq_i8_641x017x031",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_128x112x096",
+      "shape": {
+        "m": 128,
+        "n": 112,
+        "k": 96
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_128x112x096",
+      "oracle_hash": "pending-oracle-qmq_i8_128x112x096",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_032x048x512",
+      "shape": {
+        "m": 32,
+        "n": 48,
+        "k": 512
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_032x048x512",
+      "oracle_hash": "pending-oracle-qmq_i8_032x048x512",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_319x001x127",
+      "shape": {
+        "m": 319,
+        "n": 1,
+        "k": 127
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_319x001x127",
+      "oracle_hash": "pending-oracle-qmq_i8_319x001x127",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_319x007x128",
+      "shape": {
+        "m": 319,
+        "n": 7,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_319x007x128",
+      "oracle_hash": "pending-oracle-qmq_i8_319x007x128",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_319x063x063",
+      "shape": {
+        "m": 319,
+        "n": 63,
+        "k": 63
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_319x063x063",
+      "oracle_hash": "pending-oracle-qmq_i8_319x063x063",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_319x065x065",
+      "shape": {
+        "m": 319,
+        "n": 65,
+        "k": 65
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_319x065x065",
+      "oracle_hash": "pending-oracle-qmq_i8_319x065x065",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_129x121x129",
+      "shape": {
+        "m": 129,
+        "n": 121,
+        "k": 129
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_129x121x129",
+      "oracle_hash": "pending-oracle-qmq_i8_129x121x129",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_080x112x256",
+      "shape": {
+        "m": 80,
+        "n": 112,
+        "k": 256
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_080x112x256",
+      "oracle_hash": "pending-oracle-qmq_i8_080x112x256",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_065x129x257",
+      "shape": {
+        "m": 65,
+        "n": 129,
+        "k": 257
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_065x129x257",
+      "oracle_hash": "pending-oracle-qmq_i8_065x129x257",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_320x064x096",
+      "shape": {
+        "m": 320,
+        "n": 64,
+        "k": 96
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_320x064x096",
+      "oracle_hash": "pending-oracle-qmq_i8_320x064x096",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_017x505x128",
+      "shape": {
+        "m": 17,
+        "n": 505,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_017x505x128",
+      "oracle_hash": "pending-oracle-qmq_i8_017x505x128",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
+    },
+    {
+      "case_id": "qmq_i8_129x249x128",
+      "shape": {
+        "m": 129,
+        "n": 249,
+        "k": 128
+      },
+      "dtype": "int8",
+      "layout": "qmq-v1",
+      "input_hash": "pending-input-qmq_i8_129x249x128",
+      "oracle_hash": "pending-oracle-qmq_i8_129x249x128",
+      "coverage_group": "historical",
+      "generation": {
+        "seed": 42,
+        "mode": "random"
+      }
     }
   ]
 }

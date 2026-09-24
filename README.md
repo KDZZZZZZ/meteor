@@ -123,6 +123,12 @@ Use `hardware.supported_metrics` and each tool's schema to select measurements. 
 
 ## Research Shape
 
+### Default Full-Size Suite
+
+New projects use **192 fixed qmq-v1 shapes**, with an envelope of **M=1–8192, N=1–32769, K=1–8192**. The matrix retains the four previous smoke cases and adds alignment and routing boundaries, zero-input cases, and representative large matrices including 4096³. This is a finite selection, not the Cartesian product or a kernel support guarantee. See the [coverage policy](templates/project/asc/full-size-policy.md) and [existing-kernel audit](docs/2026-09-24-full-size-coverage.md).
+
+Preparing inputs and CPU goldens requires about **201.5 MiB** of pinned binary data. Preparation is asynchronous and cancellable. Every delivered revision still needs its author's full single-kernel test, with unsupported cases counted separately from passes. Existing fixed suites and receipts are preserved; extending an old project requires selecting a new suite file before the next research.
+
 Each research task uses:
 
 - one base persona in `prompts/meteor.md`;

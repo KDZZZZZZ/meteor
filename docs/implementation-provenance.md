@@ -2,6 +2,13 @@
 
 This document separates human design requirements, Agent implementation choices, and external/reference material used while building meteor.
 
+## Full-Size Coverage Update (2026-09-24)
+
+- **Human design:** inspect existing kernels and define a sufficiently broad full-size range.
+- **Agent choices:** 192 finite shapes spanning M=1–8192, N=1–32769, K=1–8192; route/alignment boundaries, representative large matrices and selected historical cases; a 256 MiB pinned-data ceiling for the current single-JSON SSH transport. Preserve existing suites and receipts. Generate CPU references asynchronously with atomic per-case publication and cancellation cleanup; use a mathematically bounded FP64 integer dot product followed by the existing FP32 stages.
+- **References:** local v235 kernel guards/catalog, NVIDIA CUTLASS profiler's explicit problem-size lists, and NumPy 2.3 matmul's BLAS capability. The numerical exactness derivation and matrix limits are project decisions; no vendor implementation was copied. References, source hashes and verification limits are in the [coverage audit](2026-09-24-full-size-coverage.md) and [policy](../templates/project/asc/full-size-policy.md).
+- **Evidence boundary:** old four-case NPU results retain their old scope. Local oracle generation and regression success do not establish any candidate's performance or correctness on the 192-case suite.
+
 ## Human Design
 
 - Plugin name: `meteor`.

@@ -3,7 +3,8 @@ export type Verdict = 'SUPPORTED' | 'REFUTED' | 'INCONCLUSIVE';
 export type RunStatus = 'CREATED' | 'ACTIVE' | 'PAUSED' | 'OUTPUT_FROZEN' | 'COMMIT_PENDING' | 'REPORT_PENDING' | 'CLOSED' | 'CANCELLED' | 'FAILED' | 'INTERRUPTED' | 'UNKNOWN_REMOTE';
 export type CaseStatus = 'PASS' | 'INCORRECT' | 'UNSUPPORTED' | 'RESOURCE_REJECTED' | 'RUN_FAILED' | 'TIMEOUT' | 'NOT_RUN';
 export interface Shape { m: number; n: number; k: number }
-export interface Case { case_id: string; shape: Shape; dtype: string; layout: string; input_hash: string; oracle_hash: string; data_ref?: string }
+export interface Case { case_id: string; shape: Shape; dtype: string; layout: string; input_hash: string; oracle_hash: string; data_ref?: string;
+  generation?: { seed: number; mode: 'random' | 'zero-row' | 'all-zero' }; coverage_group?: string }
 export interface CaseSuite { revision: string; operator_abi: string; cases: Case[] }
 export interface Environment {
   environment_ref: string; hardware: string; toolchain: string; measurement_protocol_ref: string; simulated: boolean;
