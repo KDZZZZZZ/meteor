@@ -398,6 +398,28 @@ test('remote cancellation remains uncertain and collection reuses the original r
   await h.host.dispose();
 });
 
+test('confirmed remote cancellation is collected without reissuing the experiment', async () => {
+  const h = harness();
+  const started = await h.call('meteor_start', { research_id: 'remote-cancelled', goal: 'Collect a cancelled queued request' });
+  const { child } = await h.childReady.promise;
+  const state = h.host.active.get('remote-cancelled')!;
+  state.project.config.execution.backend = 'ssh';
+  let calls = 0;
+  state.runtime.build = {
+    selectRunner: () => ({ async pollRemote() { return { status: 'CANCELLED', remote_release_confirmed: true }; } }),
+    receiptRef: () => 'build.json', buildReceiptPath: () => join(h.root, 'build.json'),
+    async buildKernel() { calls++; return { status: 'UNKNOWN_REMOTE', build_id: 'lost-connection' }; },
+  };
+  const request = await h.call('meteor_kernel_build', { experiment_id: 'e1', kernel_path: 'drafts/kernel.json' }, child);
+  const collected = await h.call('meteor_run_control', { request_id: request.request_id, action: 'collect' }, child);
+  assert.equal(collected.status, 'CANCELLED');
+  assert.equal(collected.remote_state.remote_release_confirmed, true);
+  assert.equal(calls, 1);
+  await h.call('meteor_control', { research_id: 'remote-cancelled', action: 'cancel' });
+  await h.jobs.get(started.job_id).done;
+  await h.host.dispose();
+});
+
 test('installed DSH alpha.2 ToolRuntime accepts and executes meteor tool definitions', { skip: !process.env.METEOR_DSH_MODULE_ROOT }, async () => {
   const base = process.env.METEOR_DSH_MODULE_ROOT!;
   const { Context } = await import(pathToFileURL(join(base, '@deepseek-ai/cordis/lib/index.js')).href);

@@ -109,12 +109,52 @@ Polling and cancellation:
 - `collect` returns the durable result when available.
 - `cancel` writes a cancellation marker consumed at execution boundaries and reports `remote_released:false`. Use `poll`/`collect` to establish the eventual outcome; requesting cancellation alone does not prove the remote process stopped.
 
+## Shared execution queue
+
+All `build`, `test`, `profile` and `hardware` requests enter one FIFO slot, before
+compilation or device activity. The default Linux queue is
+`/tmp/meteor-execution-<uid>`, shared across project roots, SSH aliases and device
+indices for that account on that host. The whole full-suite measurement,
+including separate profiler witnesses, retains the slot. Different machines have
+independent queues. The centralized SSH profile may supply a dedicated absolute
+`queue_root` on a local filesystem; accounts sharing hardware must use the same
+permissioned directory. Uncoordinated external programs and isolated container
+filesystems are outside this cooperative queue.
+
+Waiting calls return their result through the original tool invocation; no extra
+agent or chief dispatch is required. `poll` reports `status: RUNNING` with
+`state.state: queued` and `queue` metadata: ticket, position (0 running, 1 next),
+active_request_id, enqueued_at, started_at, wait_seconds. These are scheduling
+times, never kernel timings. Final results retain the queue metadata. The broad
+research wall-clock budget includes waiting; command timeouts start after
+admission. Poll/collect/cancel bypass the queue.
+
+Queued payloads are durably spooled; the driver reloads large base64 case data
+after admission. Cancellation while queued exits without launching a command.
+During a command the driver checks cancellation, kills its POSIX process group
+on cancellation/timeout and waits before releasing. A ticket's OS lock is held
+by its driver and inherited command descriptors, so a crashed parent cannot
+release a still-running child's slot. Dead tickets are pruned only after that
+lock becomes available; time alone never proves release. A genuinely live hung
+or orphaned process must be diagnosed/stopped, not bypassed by deleting locks.
+Keep querying the original request after a transport failure. Completed replay
+does not enqueue or repeat measurements. A crashed request with no confirmed
+result remains UNKNOWN_REMOTE; freeing its queue slot does not authorize
+automatically rerunning an experiment whose outcome is unknown.
+
+The old per-root device lock remains for compatibility during rollout. Frozen
+old research snapshots keep their old driver; only upgraded/new research uses
+the host queue. Do not edit frozen snapshots or claim that an old in-flight run
+has acquired the new queue. Windows support is for local fake protocol tests;
+production SSH execution and inherited-descriptor recovery target Linux.
+
 ## Durable Layout
 
 ```text
 <remote_root>/
   drivers/<bundle_hash>/
     driver.py
+    execution_queue.py
     CMakeLists.txt
     main.asc
     hardware_probe.cpp
@@ -144,6 +184,11 @@ Polling and cancellation:
     cancel.json
     operation.lock
   .device-<device_id>.lock
+
+/tmp/meteor-execution-<uid>/  # independent of remote_root
+  metadata.lock
+  queue.json
+  <ticket-token>.lock
 ```
 
 For hardware, build, test and profile actions, repeating the same `request_id` with the same payload returns the previous result when finished, or its running/unknown state while work remains active. Repeating it with a different payload fails. The SSH transport assigns a new request ID to a new measurement unless the caller supplies an idempotency key; replaying an existing request does not produce another independent measurement.

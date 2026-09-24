@@ -176,6 +176,7 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
           record.remote_state = args.action === 'cancel'
             ? await runner.cancelRemote(state.project, record.remote_request_id)
             : await runner.pollRemote(state.project, record.remote_request_id);
+          if (record.remote_state.status === 'CANCELLED' && record.remote_state.remote_release_confirmed) record.status = 'CANCELLED';
           if (args.action === 'collect' && record.remote_state.status === 'COMPLETED' && record.work) {
             state.preparedIds.clear();
             record.receipt = await record.work(exec.signal, record.request_id);

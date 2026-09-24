@@ -29,6 +29,17 @@ process.stdin.on('end', () => {
     process.exit(0);
   }
   const req = body.request;
+  if (${JSON.stringify(mode)} === 'queue-states') {
+    const queue = {scope:'host',capacity:1,ticket:2,position:1,active_request_id:'test-first',wait_seconds:3};
+    const state = {state:'queued',queue};
+    const result = req.request_id === 'cancelled'
+      ? {status:'FINISHED',result:{status:'CANCELLED',queue,remote_release_confirmed:true}}
+      : req.request_id === 'unknown'
+      ? {status:'FINISHED',result:{status:'UNKNOWN_REMOTE',remote_release_confirmed:false}}
+      : {status:'RUNNING',state,queue,remote_release_confirmed:false};
+    console.log(JSON.stringify({ok:true,result}));
+    return;
+  }
   if (${JSON.stringify(mode)} === 'simulated') {
     console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:true,artifact_hash:'a'.repeat(64),remote_build_id:req.build_id,rendered_source_hash:req.rendered_source_hash}}));
     return;
@@ -380,4 +391,26 @@ test('SSH preserves candidate execution evidence and sends candidate identity', 
   assert.equal(receipt.rows[0].device_execution?.status, 'CONFIRMED');
   assert.equal(receipt.rows[0].reason, undefined);
   assert.equal(JSON.parse(readFileSync(logPath, 'utf8').trim()).kernel_name, 'demo_');
+}));
+
+test('SSH polling preserves queued state, cancellation release and unknown remote uncertainty', withFakeSsh('queue-states', async (root, logPath) => {
+  const runner = new SshRunner();
+  const profiles = JSON.parse(readFileSync(process.env.METEOR_PROFILES_PATH!, 'utf8'));
+  profiles.profiles.dev.queue_root = '/tmp/meteor-shared-queue';
+  writeJson(process.env.METEOR_PROFILES_PATH!, profiles);
+  const waiting = await runner.pollRemote(project(root), 'waiting');
+  assert.equal(waiting.status, 'RUNNING');
+  assert.equal(waiting.receipt.state.state, 'queued');
+  assert.equal(waiting.receipt.queue.position, 1);
+  assert.equal(waiting.remote_release_confirmed, false);
+  const cancelled = await runner.pollRemote(project(root), 'cancelled');
+  assert.equal(cancelled.status, 'CANCELLED');
+  assert.equal(cancelled.receipt.status, 'CANCELLED');
+  assert.equal(cancelled.remote_release_confirmed, true);
+  const unknown = await runner.pollRemote(project(root), 'unknown');
+  assert.equal(unknown.status, 'UNKNOWN_REMOTE');
+  assert.equal(unknown.remote_release_confirmed, false);
+  for (const line of readFileSync(logPath, 'utf8').trim().split('\n')) {
+    assert.equal(JSON.parse(line).queue_root, '/tmp/meteor-shared-queue');
+  }
 }));

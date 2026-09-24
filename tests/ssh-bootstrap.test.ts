@@ -51,11 +51,12 @@ def tracked_open(path,mode='r',*args,**kwargs):
  if slow and 'b' in mode and ('w' in mode or 'x' in mode): return PausedWriter(file)
  return file
 io.open=tracked_open
-def local_driver(command,input,text):
+def local_driver(command,stdin,text):
  bundle=Path(payload['remote_root'])/'drivers'/payload['bundle_hash']
  assert Path(command[-1]).resolve()==(bundle/'driver.py').resolve()
  for name,entry in payload['files'].items():
   assert (bundle/name).read_bytes()==base64.b64decode(entry['base64']), 'driver observed incomplete bundle'
+ assert json.load(stdin)==payload['request'], 'spooled request changed'
  (control/(worker_id+'.driver')).touch()
  if hold_driver: wait_for(control/'drivers-release')
  return SimpleNamespace(returncode=0)

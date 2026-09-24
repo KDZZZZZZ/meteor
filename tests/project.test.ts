@@ -72,6 +72,13 @@ test('central SSH profiles permit aliases, reject embedded credentials, and neve
   const path = join(root, 'profiles.json');
   writeJson(path, { schema_version: 1, profiles: { dev: { ssh_alias: 'ascend-dev', remote_root: '/mnt/workspace/meteor' } } });
   assert.equal(loadSshProfile('dev', { profilesPath: path }).ssh_alias, 'ascend-dev');
+  const shared = { ssh_alias: 'ascend-dev', remote_root: '/mnt/workspace/meteor', queue_root: '/tmp/meteor-shared-queue' };
+  writeJson(path, { schema_version: 1, profiles: { dev: shared } });
+  assert.equal(loadSshProfile('dev', { profilesPath: path }).queue_root, shared.queue_root);
+  for (const queue_root of ['relative', '/tmp', '/', '/tmp/../other']) {
+    writeJson(path, { schema_version: 1, profiles: { dev: { ...shared, queue_root } } });
+    assert.throws(() => loadSshProfile('dev', { profilesPath: path }), /queue_root/);
+  }
   writeJson(path, { schema_version: 1, profiles: { dev: { ssh_alias: 'ascend-dev', remote_root: '/mnt/workspace/meteor', private_key: 'not-a-real-key' } } });
   assert.throws(() => loadSshProfile('dev', { profilesPath: path }), /credentials belong/);
   writeJson(path, { schema_version: 1, profiles: { dev: { ssh_alias: '-oProxyCommand=bad', remote_root: '/mnt/workspace/meteor' } } });

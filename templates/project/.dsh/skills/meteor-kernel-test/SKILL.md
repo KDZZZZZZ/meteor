@@ -78,6 +78,14 @@ Chief 启动后按下方原生等待规则收取 jobs 的结果。遇到插件�
 
 接口依据：DSH 0.1.7-alpha.2 的 [job 工具](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/jobs/tool-jobs/README.md)、[goal driver](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/goal/goal-round-driver/src/index.ts)。`wait_agent` 属于实验性 Agent Teams，不用它等待 Meteor 的普通 job。
 
+### 同机实验自动排队
+
+SSH 后端自动把 build、probe/full test、profile 和设备探测放进远端 FIFO 队列。同一 SSH 用户在同一台机器上默认只有一个执行名额，跨 research、项目目录、profile 别名和 device_id 共用；整次 full 测试与其独立 profiler 采集占用同一名额，结束后才轮到下一请求。Chief 可以让多个 subagent 并行研究，测试调用由编写者发起并自动等待，Chief 无需手动安排或补测。
+
+工具会一直等待原请求的结果。排队状态不是失败、设备不支持或假设结论。远端 poll/collect 返回的 `state.state: queued` 与 `queue` 给出 ticket、position（0 为执行中、1 为下一位）、active_request_id 和等待时间；最终 raw receipt 保留排队耗时，不能将它算作 kernel 延迟。SSH 断线后查询原 request_id，禁止因为等待而重复提交、换 ID 重试、用 shell 绕过测试器或删除锁文件。
+
+取消标记会让排队请求退出；执行中的命令停止并确认释放后才可声称名额已释放。`remote_release_confirmed:false` 仍需按原请求查询。等待不消耗设备命令的执行超时，但仍占研究的墙钟预算；Chief 根据队列积压减少新研究的并行度，不擅自扩预算或将未测 case 伪装成 UNSUPPORTED。跨 SSH 用户需要由集中 profile 的 `queue_root` 指向同一已配置权限的本地目录；不要给每轮研究分配不同队列来绕开串行限制。
+
 Chief 可根据已完成报告和可复现的行为缺口改进项目现有 `prompts/meteor.md` 或这两个 skill，记录修改依据；修改只影响未来 research 的快照。保留正在运行的 snapshot、原始证据和研究结果，不向运行中的 Agent 中途喂提示，不代写最终提交。继续使用一份 persona 和两个 skill，不新增角色 prompt。新研究仍由 Chief 明确调用启动，插件和研究 Agent 不递归创建研究。
 
 Chief 负责维护仓库，功能分支使用 `<type>/<kebab>` 命名；`main`/`dev` 仅经 PR 合入，无需他人审核。只有用户明确允许时才创建 PR，开展研究不构成 PR 许可。提交说明和交付报告区分人类设计、Agent 自主决策、成熟实现借鉴，并写明验证与限制。

@@ -125,6 +125,25 @@ A real `PASS` requires correct output and evidence that the target kernel execut
 
 Use `hardware.supported_metrics` and each tool's schema to select measurements. `kernel_time_us` is the runner's declared ACL event interval, not a hardware counter. `device_task_time_us` must not be requested or claimed unless the implemented capability is advertised in that report. Benchmark timing and profiler observations have different scopes and are kept separate. Official CLI examples in the [Ascend measurement guide](docs/ascend-measurement-guide.md) are manual diagnostic references to check against the installed version; they do not imply that every profiler feature is implemented by Meteor's tool interface.
 
+### Automatic Remote Queue
+
+Parallel research Agents can author and analyze independently. Their SSH builds,
+single-kernel tests, profiles and hardware probes automatically share **one FIFO
+execution slot per host/SSH account**, including across project roots and device
+indices. The authoring Agent's tool call waits and returns its original result;
+chief does not schedule individual tests. Full-suite timing and profiler capture
+stay within the same slot. Polling exposes the queue position; raw receipts
+retain wait duration separately from kernel samples.
+
+The default Linux queue directory is `/tmp/meteor-execution-<uid>`. A centralized
+SSH profile can set `queue_root` when accounts must share a permissioned local
+directory; leave it unset for the normal single-account setup. Waiting consumes
+research wall time but not the device command timeout. Cancellation removes a
+waiting request or stops its executing command before release. OS-held tickets
+prevent dead processes from blocking others, and keep a surviving command's
+slot after its driver dies. Unknown remote outcomes remain unknown and are not
+automatically rerun. See the [queue design and validation](docs/2026-09-24-remote-execution-queue.md).
+
 ## Research Shape
 
 ### Default Full-Size Suite

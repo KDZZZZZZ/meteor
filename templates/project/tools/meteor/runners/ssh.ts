@@ -31,7 +31,11 @@ for name,entry in p['files'].items():
    except FileExistsError: assert target.read_bytes()==data
 driver=p.get('driver_path') or str(bundle/'driver.py')
 command=['bash','-c','source "$1" >/dev/null 2>&1 || exit; export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:$LD_LIBRARY_PATH; exec python3 "$2"','meteor',p['env_script'],driver]
-result=subprocess.run(command,input=json.dumps(p['request']),text=True)
+with tempfile.TemporaryFile(mode='w+',encoding='utf-8') as request_input:
+ json.dump(p.pop('request'),request_input)
+ request_input.seek(0)
+ p.clear()
+ result=subprocess.run(command,stdin=request_input,text=True)
 sys.exit(result.returncode)
 `;
 function shellQuote(value: string) { return "'" + value.replaceAll("'", "'\\''") + "'"; }
@@ -53,11 +57,21 @@ function remoteIdempotency(prefix: string, key?: string) {
 }
 function normalizeRemoteStatus(status: string): 'COMPLETED' | 'FAILED' | 'UNKNOWN_REMOTE' {
   if (status === 'COMPLETED' || status === 'FINISHED') return 'COMPLETED';
-  if (status === 'RUNNING' || status === 'UNKNOWN_REMOTE') return 'UNKNOWN_REMOTE';
+  if (status === 'RUNNING' || status === 'QUEUED' || status === 'UNKNOWN_REMOTE') return 'UNKNOWN_REMOTE';
   return 'FAILED';
 }
+function remotePollStatus(result: any) {
+  const status = result.status === 'FINISHED' ? result.result?.status : result.status;
+  if (status === 'RUNNING' || status === 'QUEUED') return 'RUNNING' as const;
+  if (status === 'CANCELLED') return 'CANCELLED' as const;
+  if (status === 'NOT_FOUND') return 'NOT_FOUND' as const;
+  return normalizeRemoteStatus(status);
+}
 function releaseConfirmed(result: any): boolean {
-  return result?.remote_release_confirmed === true || result?.remote_released === true || result?.status === 'COMPLETED' || result?.status === 'FINISHED';
+  if (typeof result?.remote_release_confirmed === 'boolean') return result.remote_release_confirmed;
+  if (typeof result?.remote_released === 'boolean') return result.remote_released;
+  if (result?.status === 'FINISHED' && result.result) return releaseConfirmed(result.result);
+  return result?.status === 'COMPLETED';
 }
 function trimDiagnostic(value: unknown, limit = 3500): string {
   const text = String(value ?? '').trim();
@@ -136,6 +150,7 @@ export async function remoteRequest(project: Project, request: any, signal?: Abo
   const body = { remote_root: profile.remote_root, env_script: profile.env_script, driver_path: profile.driver_path,
     bundle_hash: hashObject(files), files, request: { ...request, remote_root: profile.remote_root,
       env_script: profile.env_script, ...(deviceId === undefined ? {} : { device_id: Number(deviceId) }),
+      ...(profile.queue_root === undefined ? {} : { queue_root: profile.queue_root }),
       ...(npuArch === undefined ? {} : { npu_arch: npuArch }) } };
   const args = ['-T', '-o', 'BatchMode=yes', '-o', `ConnectTimeout=${profile.connect_timeout_seconds ?? 15}`, profile.ssh_alias,
     'python3 -c ' + shellQuote(BOOTSTRAP)];
@@ -272,7 +287,7 @@ export class SshRunner implements Runner {
       research_id: request.build.research_id, experiment_id: request.build.experiment_id, kernel_ref: request.build.kernel_ref,
       build_ref: `reports/meteor/ssh/research/${request.build.research_id}/experiments/${request.build.experiment_id}/builds/${request.build.build_id}.json`,
       source_hash: request.build.source_hash, artifact_hash: request.build.artifact_hash, execution_backend: 'ssh', simulated: false,
-      ...common(request.project), mode: request.mode, status: normalizeRemoteStatus(result.status),
+      ...common(request.project), mode: request.mode, status: result.status === 'CANCELLED' ? 'CANCELLED' : normalizeRemoteStatus(result.status),
       rows, ...summarizeRows(rows, request.mode, request.project), data_hash: hashObject(rows),
       remote_request_id: result.request_id, raw_receipt_ref: raw, remote_release_confirmed: releaseConfirmed(result) } as TestReceipt;
   }
@@ -314,12 +329,12 @@ export class SshRunner implements Runner {
   async pollRemote(project: Project, remoteRequestId: string) {
     const result = await remoteRequest(project, { action: 'poll', request_id: remoteRequestId });
     const raw = rawRef(project, result);
-    return { status: normalizeRemoteStatus(result.status), receipt: result.result ?? result, raw_receipt_ref: raw, remote_release_confirmed: releaseConfirmed(result), reason: result.error ?? result.reason };
+    return { status: remotePollStatus(result), receipt: result.result ?? result, raw_receipt_ref: raw, remote_release_confirmed: releaseConfirmed(result), reason: result.error ?? result.reason };
   }
   async collectRemote(project: Project, remoteRequestId: string) {
     const result = await remoteRequest(project, { action: 'collect', request_id: remoteRequestId });
     const raw = rawRef(project, result);
-    return { status: normalizeRemoteStatus(result.status), receipt: result.result ?? result, raw_receipt_ref: raw, remote_release_confirmed: releaseConfirmed(result), reason: result.error ?? result.reason };
+    return { status: remotePollStatus(result), receipt: result.result ?? result, raw_receipt_ref: raw, remote_release_confirmed: releaseConfirmed(result), reason: result.error ?? result.reason };
   }
   async cancelRemote(project: Project, remoteRequestId: string) {
     const result = await remoteRequest(project, { action: 'cancel', request_id: remoteRequestId });

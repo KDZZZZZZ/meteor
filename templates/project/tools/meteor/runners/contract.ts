@@ -55,8 +55,8 @@ export interface Runner {
   test(request: TestRequest): Promise<TestReceipt>;
   profile(request: ProfileRequest): Promise<ProfileReceipt>;
   cancelRemote?(project: Project, remoteRequestId: string): Promise<{ status: 'CANCEL_REQUESTED' | 'UNKNOWN_REMOTE' | 'NOT_FOUND'; receipt?: unknown; raw_receipt_ref?: string; remote_release_confirmed: boolean; reason?: string }>;
-  pollRemote?(project: Project, remoteRequestId: string): Promise<{ status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNKNOWN_REMOTE' | 'NOT_FOUND'; receipt?: unknown; raw_receipt_ref?: string; remote_release_confirmed: boolean; reason?: string }>;
-  collectRemote?(project: Project, remoteRequestId: string): Promise<{ status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNKNOWN_REMOTE' | 'NOT_FOUND'; receipt?: unknown; raw_receipt_ref?: string; remote_release_confirmed: boolean; reason?: string }>;
+  pollRemote?(project: Project, remoteRequestId: string): Promise<{ status: 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'FAILED' | 'UNKNOWN_REMOTE' | 'NOT_FOUND'; receipt?: unknown; raw_receipt_ref?: string; remote_release_confirmed: boolean; reason?: string }>;
+  collectRemote?(project: Project, remoteRequestId: string): Promise<{ status: 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'FAILED' | 'UNKNOWN_REMOTE' | 'NOT_FOUND'; receipt?: unknown; raw_receipt_ref?: string; remote_release_confirmed: boolean; reason?: string }>;
   cancel?(idempotencyKey: string): Promise<{ status: 'CANCELLED' | 'UNKNOWN_REMOTE' | 'NOT_FOUND'; reason?: string }>;
   poll?(idempotencyKey: string): Promise<{ status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNKNOWN_REMOTE'; reason?: string }>;
   collect?(idempotencyKey: string): Promise<unknown>;

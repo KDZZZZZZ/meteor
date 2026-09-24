@@ -22,11 +22,14 @@ import sys
 import time
 from typing import Any
 
+from execution_queue import ExecutionQueue, FileLock, QueueCancelled
+
 
 DRIVER_DIR = Path(__file__).resolve().parent
 TIMING_PREFIX = "QMQ_TIMING_US "
 SUPPORTED_PROFILE_METRICS = ["kernel_time_us", "device_task_time_us"]
 DEVICE_TASK_TYPES = {"AI_CORE", "AICORE", "AI_VECTOR_CORE", "AI_VECTOR", "AIV", "MIX_AIC", "MIX_AICORE", "MIX_AIV"}
+ACTIVE_QUEUE: ExecutionQueue | None = None
 
 
 def canonical(value: Any) -> str:
@@ -161,12 +164,8 @@ class OperationLock:
 def finish(request_dir: Path, result: dict[str, Any]) -> dict[str, Any]:
     result = {**result, "finished_at": time.time()}
     write_json(request_dir / "result.json", result)
-    write_json(request_dir / "status.json", {"state": "finished", "status": result.get("status"), "finished_at": result["finished_at"]})
+    write_json(request_dir / "status.json", {"state": "finished", "status": result.get("status"), "finished_at": result["finished_at"], "queue": result.get("queue")})
     return result
-
-
-def mark_running(request_dir: Path, action: str) -> None:
-    write_json(request_dir / "status.json", {"state": "running", "action": action, "pid": os.getpid(), "started_at": time.time()})
 
 
 def maybe_existing_result(request_dir: Path) -> dict[str, Any] | None:
@@ -195,7 +194,7 @@ def running_or_unknown(request_dir: Path, simulated: bool) -> dict[str, Any]:
     status = read_json(status_path)
     alive = pid_is_alive(status.get("pid"))
     if alive is True:
-        return {"status": "RUNNING", "simulated": simulated, "state": status}
+        return {"status": "RUNNING", "simulated": simulated, "state": status, "queue": status.get("queue")}
     return {"status": "UNKNOWN_REMOTE", "simulated": simulated, "state": status, "reason": "previous request did not finish and no live pid was confirmed"}
 
 
@@ -207,60 +206,74 @@ def guard_before_execution(request_dir: Path, simulated: bool) -> dict[str, Any]
     if not status_path.exists():
         return None
     status = read_json(status_path)
-    if status.get("state") != "running":
+    if status.get("state") not in {"queued", "running"}:
         return None
     alive = pid_is_alive(status.get("pid"))
     if alive is True:
-        return {"status": "RUNNING", "simulated": simulated, "state": status}
+        return {"status": "RUNNING", "simulated": simulated, "state": status, "queue": status.get("queue")}
     return {"status": "UNKNOWN_REMOTE", "simulated": simulated, "state": status, "reason": "previous request stopped before completion"}
 
 
 class DeviceLock:
+    """Retain the old per-root device lock for compatibility with older drivers."""
     def __init__(self, remote_root: Path, device_id: int):
         self.path = inside(remote_root, f".device-{device_id}.lock")
-        self.file = None
+        self.lock = None
 
     def __enter__(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.file = open(self.path, "a+", encoding="utf-8")
-        if os.name == "posix":
-            import fcntl
-            fcntl.flock(self.file.fileno(), fcntl.LOCK_EX)
-        else:
-            import msvcrt
-            msvcrt.locking(self.file.fileno(), msvcrt.LK_LOCK, 1)
-        self.file.seek(0)
-        self.file.truncate()
-        self.file.write(json.dumps({"pid": os.getpid(), "locked_at": time.time()}) + "\n")
-        self.file.flush()
-        return self
+        self.lock = FileLock(self.path)
+        try:
+            while not self.lock.acquire(blocking=False):
+                if ACTIVE_QUEUE:
+                    ACTIVE_QUEUE.check_cancelled()
+                time.sleep(0.2)
+            return self
+        except BaseException:
+            self.lock.close()
+            raise
 
     def __exit__(self, exc_type, exc, tb):
-        if self.file is None:
-            return
-        try:
-            self.file.seek(0)
-            self.file.truncate()
-            self.file.flush()
-        finally:
-            if os.name == "posix":
-                import fcntl
-                fcntl.flock(self.file.fileno(), fcntl.LOCK_UN)
-            else:
-                import msvcrt
-                self.file.seek(0)
-                msvcrt.locking(self.file.fileno(), msvcrt.LK_UNLCK, 1)
-            self.file.close()
+        if self.lock:
+            self.lock.close()
 
 
 def run_command(command: list[str], cwd: Path, timeout: int = 900) -> dict[str, Any]:
     started = time.time()
-    proc = subprocess.run(command, cwd=str(cwd), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+    deadline = time.monotonic() + timeout
+    if ACTIVE_QUEUE:
+        ACTIVE_QUEUE.check_cancelled()
+    options = {"start_new_session": True, "pass_fds": ACTIVE_QUEUE.pass_fds if ACTIVE_QUEUE else ()} if os.name == "posix" else {}
+    proc = subprocess.Popen(command, cwd=str(cwd), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
+    try:
+        while True:
+            if ACTIVE_QUEUE:
+                ACTIVE_QUEUE.check_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            try:
+                stdout, stderr = proc.communicate(timeout=min(0.2, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except BaseException:
+        if os.name == "posix":
+            # Compiler/profiler children belong to this command's process group.
+            # Terminate them before relinquishing the queue's execution slot.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            proc.kill()
+        proc.communicate()
+        raise
     return {
         "command": command,
         "returncode": proc.returncode,
-        "stdout": proc.stdout[-20000:],
-        "stderr": proc.stderr[-20000:],
+        "stdout": stdout[-20000:],
+        "stderr": stderr[-20000:],
         "duration_seconds": time.time() - started,
     }
 
@@ -329,10 +342,6 @@ def make_fake_executable(path: Path) -> None:
 
 def action_build(request: dict[str, Any], remote_root: Path, request_dir: Path) -> dict[str, Any]:
     simulated = fake_enabled()
-    guarded = guard_before_execution(request_dir, simulated)
-    if guarded is not None:
-        return guarded
-    mark_running(request_dir, "build")
     build_id = require_id(request.get("build_id"), "build_id")
     npu_arch = request.get("npu_arch") if simulated else require_npu_arch(request)
     if not isinstance(npu_arch, str) or not npu_arch:
@@ -373,7 +382,7 @@ def action_build(request: dict[str, Any], remote_root: Path, request_dir: Path) 
         "rendered_source_hash": request.get("rendered_source_hash"),
     }
     write_json(build_dir / "build-result.json", result)
-    return finish(request_dir, result)
+    return result
 
 
 def verifier_sha256() -> str:
@@ -656,10 +665,6 @@ def execute_case(request: dict[str, Any], remote_root: Path, executable: Path, c
 
 def action_test(request: dict[str, Any], remote_root: Path, request_dir: Path) -> dict[str, Any]:
     simulated = fake_enabled()
-    guarded = guard_before_execution(request_dir, simulated)
-    if guarded is not None:
-        return guarded
-    mark_running(request_dir, "test")
     build_id = require_id(request.get("build_id"), "build_id")
     device_id = require_int(request.get("device_id"), "device_id")
     repetitions = int(request.get("repetitions", 5))
@@ -697,15 +702,11 @@ def action_test(request: dict[str, Any], remote_root: Path, request_dir: Path) -
         "rows": rows,
         "data_hash": sha256_text(canonical(rows)),
     }
-    return finish(request_dir, result)
+    return result
 
 
 def action_profile(request: dict[str, Any], remote_root: Path, request_dir: Path) -> dict[str, Any]:
     simulated = fake_enabled()
-    guarded = guard_before_execution(request_dir, simulated)
-    if guarded is not None:
-        return guarded
-    mark_running(request_dir, "profile")
     metrics = request.get("metrics") or ["kernel_time_us"]
     unsupported = [metric for metric in metrics if metric not in SUPPORTED_PROFILE_METRICS]
     if unsupported:
@@ -718,7 +719,7 @@ def action_profile(request: dict[str, Any], remote_root: Path, request_dir: Path
             "allowed_metrics": SUPPORTED_PROFILE_METRICS,
             "instrumented": False,
         }
-        return finish(request_dir, result)
+        return result
     build_id = require_id(request.get("build_id"), "build_id")
     device_id = require_int(request.get("device_id"), "device_id")
     repetitions = int(request.get("repetitions", 5))
@@ -763,7 +764,7 @@ def action_profile(request: dict[str, Any], remote_root: Path, request_dir: Path
         "observations": observations,
         "raw_profiles": raw,
     }
-    return finish(request_dir, result)
+    return result
 
 
 def parse_npu_smi_devices(stdout: str) -> list[dict[str, Any]]:
@@ -926,12 +927,8 @@ def run_hardware_probe(remote_root: Path, request: dict[str, Any]) -> dict[str, 
 
 def action_hardware(request: dict[str, Any], remote_root: Path, request_dir: Path) -> dict[str, Any]:
     simulated = fake_enabled()
-    guarded = guard_before_execution(request_dir, simulated)
-    if guarded is not None:
-        return guarded
-    mark_running(request_dir, "hardware")
     if simulated:
-        return finish(request_dir, {
+        return {
             "status": "COMPLETED",
             "readiness": "BLOCKED",
             "backend": "ssh",
@@ -949,7 +946,7 @@ def action_hardware(request: dict[str, Any], remote_root: Path, request_dir: Pat
             "cann": {"compiler": None, "runtime": None, "reason": "fake harness"},
             "tools": {"msprof": None, "reason": "fake harness"},
             "logs": [{"command": ["fake-hardware"], "returncode": 0, "stdout": "", "stderr": ""}],
-        })
+        }
     probe = run_hardware_probe(remote_root, request)
     logs = [
         run_optional_command(["npu-smi", "info"], remote_root),
@@ -1018,7 +1015,7 @@ def action_hardware(request: dict[str, Any], remote_root: Path, request_dir: Pat
         "probe": probe.get("parsed"),
         "logs": probe["logs"] + logs,
     }
-    return finish(request_dir, result)
+    return result
 
 
 def action_poll(request: dict[str, Any], remote_root: Path) -> dict[str, Any]:
@@ -1041,7 +1038,7 @@ def action_poll(request: dict[str, Any], remote_root: Path) -> dict[str, Any]:
             running = False
     elif isinstance(pid, int):
         running = True
-    return {"status": "RUNNING" if running else "UNKNOWN_REMOTE", "state": status}
+    return {"status": "RUNNING" if running else "UNKNOWN_REMOTE", "state": status, "queue": status.get("queue"), "remote_release_confirmed": False}
 
 
 def action_collect(request: dict[str, Any], remote_root: Path) -> dict[str, Any]:
@@ -1057,10 +1054,13 @@ def action_cancel(request: dict[str, Any], remote_root: Path) -> dict[str, Any]:
     request_dir.mkdir(parents=True, exist_ok=True)
     write_json(request_dir / "cancel.json", {"requested_at": time.time()})
     status = action_poll(request, remote_root)
+    if status.get("status") == "FINISHED":
+        return {**status, "remote_released": status["result"].get("remote_release_confirmed", False)}
     return {"status": "CANCEL_REQUESTED", "state": status, "remote_released": False}
 
 
 def dispatch(request: dict[str, Any]) -> dict[str, Any]:
+    global ACTIVE_QUEUE
     action = request.get("action")
     if action not in {"build", "test", "profile", "hardware", "poll", "collect", "cancel"}:
         raise ValueError("action must be build, test, profile, hardware, poll, collect, or cancel")
@@ -1082,13 +1082,39 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
                     raise ValueError("request_id already used for a different payload")
             return running_or_unknown(request_dir, os.environ.get("METEOR_REMOTE_DRIVER_FAKE_BUILD") == "1")
         remote_root, request_dir, _payload_hash = setup_request(request)
-        if action == "build":
-            return action_build(request, remote_root, request_dir)
-        if action == "test":
-            return action_test(request, remote_root, request_dir)
-        if action == "profile":
-            return action_profile(request, remote_root, request_dir)
-        return action_hardware(request, remote_root, request_dir)
+        guarded = guard_before_execution(request_dir, fake_enabled())
+        if guarded is not None:
+            return guarded
+        queue_root = require_remote_root(request["queue_root"]) if request.get("queue_root") else None
+        queue = ExecutionQueue(request_dir, action, queue_root)
+        # dispatch owns the input object. The durable payload is already checked
+        # and stored. Drop large base64 case arrays while waiting; only the head
+        # reloads them. Keep the response header used by main().
+        request_id = request["request_id"]
+        request.clear()
+        request.update({"action": action, "request_id": request_id})
+        try:
+            with queue:
+                ACTIVE_QUEUE = queue
+                handler = {"build": action_build, "test": action_test, "profile": action_profile, "hardware": action_hardware}[action]
+                stored = read_json(request_dir / "payload.json")
+                if sha256_text(canonical(stored)) != payload_hash:
+                    raise ValueError("Durable request payload changed while queued")
+                result = handler(stored, remote_root, request_dir)
+        except QueueCancelled as exc:
+            result = {"status": "CANCELLED", "backend": "ssh", "simulated": fake_enabled(), "reason": str(exc)}
+        except Exception as exc:
+            if queue.released():
+                finish(request_dir, {"status": "FAILED", "backend": "ssh", "simulated": fake_enabled(),
+                                     "error": str(exc), "queue": queue.queue, "remote_release_confirmed": True})
+            raise
+        finally:
+            ACTIVE_QUEUE = None
+        released = queue.released()
+        if not released:
+            return {**result, "status": "UNKNOWN_REMOTE", "queue": queue.queue, "remote_release_confirmed": False,
+                    "reason": "A command still holds this execution ticket; poll the original request"}
+        return finish(request_dir, {**result, "queue": queue.queue, "remote_release_confirmed": released})
 
 
 def main() -> int:
