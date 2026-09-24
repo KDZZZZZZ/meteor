@@ -43,6 +43,7 @@ def verify_case(directory):
     difference = np.abs(actual_scale[finite].astype(np.float64) - expected_scale[finite].astype(np.float64))
     denominator = np.maximum(np.abs(expected_scale[finite].astype(np.float64)), np.finfo(np.float32).tiny)
     first = np.flatnonzero(y_mismatch)[:8]
+    first_scale = np.flatnonzero(~scale_close)[:8]
     result = {
         "passed": y_errors == 0 and scale_errors / m <= 1e-4,
         "shape": {"m": m, "n": n, "k": metadata["k"]}, "seed": metadata["seed"], "mode": metadata["mode"],
@@ -51,6 +52,9 @@ def verify_case(directory):
               "first_mismatches": [{"row": int(i // n), "col": int(i % n), "actual": int(actual_y[i]), "expected": int(expected_y[i])} for i in first]},
         "yScale": {"elements": m, "mismatches": scale_errors, "error_fraction": scale_errors / m,
                    "nonfinite_outputs": int(np.count_nonzero(~finite)),
+                   "first_mismatches": [{"row": int(i),
+                                         "actual": float(actual_scale[i]) if finite[i] else str(actual_scale[i]),
+                                         "expected": float(expected_scale[i])} for i in first_scale],
                    "max_abs_error_finite": float(difference.max()) if difference.size else None,
                    "max_relative_error_finite": float((difference / denominator).max()) if difference.size else None,
                    "rtol": 1e-4, "atol": 1e-4, "max_error_fraction": 1e-4},

@@ -143,7 +143,7 @@ export const submissionSchema = {
     research_id: nonEmptyString,
     agent_session_id: nonEmptyString,
     execution_backend: { type: 'string', enum: ['mock', 'ssh'] },
-    termination_reason: nonEmptyString,
+    termination_reason: { ...nonEmptyString, description: 'Why this research can end now: criteria and requested deliverables met, actual budget exhausted, investigated external blocker, or cancellation. An inconclusive verdict or a repairable source error alone is not a stopping condition while feasible work and budget remain.' },
     hypothesis: hypothesisSchema,
     hypothesis_history: {
       type: 'array',

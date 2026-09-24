@@ -290,7 +290,7 @@ export class MeteorHost {
         material_policy: 'Seeds are inspiration only. Read other kernels, knowledge, and any accessible files; no inheritance is required.',
         hardware_report_ref: state.project.config.environment.hardware_report_ref,
         hypothesis_policy: 'If assigned_hypothesis is present, test the original proposition and fill missing experimental details. Treat verdicts quoted in goals, old reports or seeds as prior claims to examine, never predetermined outcomes. Reassess support/refutation using relevant controls and mechanism evidence; faster or slower kernels alone do not establish the hypothesis. A supported revision does not settle an inconclusive original. Otherwise propose your own hypothesis.',
-        completion: 'Use meteor_prepare_submission, then native structured_output with its prepared_submission_id. Keep one continuous session.',
+        completion: 'Keep one continuous session through implementation, debugging and experiments. INCONCLUSIVE describes the current evidence; it does not end a research while feasible work and budget remain. Finish when the research criteria and requested deliverables are met, the actual budget is exhausted, an investigated external blocker prevents progress, or cancellation is requested. Then use meteor_prepare_submission and native structured_output with its prepared_submission_id.',
       });
       const allow = [...RESEARCH_TOOLS, ...READ_TOOLS.filter(name => this.ctx.tools.get(name, state.chief))];
       state.run = await this.ctx.subagents.start('spawn', {

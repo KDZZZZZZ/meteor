@@ -185,7 +185,7 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
         return { request_id: record.request_id, status: record.status, receipt: record.receipt, error: record.error,
           remote_request_id: record.remote_request_id, remote_state: record.remote_state };
       }),
-    defineTool('meteor_prepare_submission', 'Validate and freeze a complete submission from this session, including full tests for every submitted kernel. Preparation does not commit or integrate. Return the resulting ID through native structured_output when finished.',
+    defineTool('meteor_prepare_submission', 'Validate and freeze the final submission, including full tests for every submitted kernel. Resolve feasible implementation or experiment gaps in this session before finishing; INCONCLUSIVE alone is not a reason to stop. Preparation validates evidence references, does not establish research success, and does not commit or integrate. Return the resulting ID through native structured_output when finished.',
       { submission: submissionSchema }, ['submission'], async (args, exec) => {
         const state = host.requireResearch(exec); const supplied = object(args.submission);
         const identity = { research_id: state.id, agent_session_id: state.sessionId, execution_backend: state.project.config.execution.backend };

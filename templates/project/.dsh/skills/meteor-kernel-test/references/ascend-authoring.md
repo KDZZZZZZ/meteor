@@ -10,6 +10,8 @@
 
 源码由模板顺序插入同一个编译单元，device 在 host 之前。模板已经定义 Meteor/Tensor 类型和外部 `run_kernel`，候选不要重新定义；host 部分实现自己的 launcher 即可。设备函数定义已可见，无需再加前向声明；若声明则保持签名、属性和 C/C++ linkage 与定义完全一致。
 
+CANN 9.0 SIMD 的启动形态是 `<<<numBlocks, l2ctrl, stream>>>`：第一项为核数，第二项是保留指针并固定传 `nullptr`，第三项为 stream。不要套用其他平台的 launch 参数含义。[9.0 核函数][kernel-entry]
+
 ## 按第一处具体诊断修复
 
 | 诊断或现象 | 检查和下一步 |
@@ -31,6 +33,8 @@ __global__ __vector__ __aicore__ void entry(/* device arguments */);
 
 每个 AIC/AIV 的 DataCache 独立；标量 GM 写入可能只把本核 cache line 标成 dirty。不同核即使写不同元素，也可能共享同一 cache line。需要根据本机支持的缓存 API、输出布局和核分工保证写回与所有权；或采用 LocalTensor 输出、正确的流水同步和 DataCopy。先把正确数据流做通，再用对照实验验证并行优化。不要将所有输出失败归因于测试器。[9.0 标量访存和同步][scalar-memory]、[官方 Add 示例][add]
 
+`volatile` 不能代替脏数据写回、缓存失效或核间同步。官方缓存接口的示例 3 展示了两个核修改同一 64B cache line 中不同元素、各自刷新却相互覆盖的情况；“每个核都调用刷新”仍不保证正确。检查实际字节地址、对齐和缓存行写入所有权；用单写入者等对照隔离并发影响，再验证目标设备支持的写回路径。NaN/Inf 也可能来自未初始化、越界或数值运算，需要逐输出诊断，不能预定缓存为根因。[缓存控制及反例][cache-control]、[volatile 与同步示例][store-barrier]
+
 ## 在本轮内完成调试
 
 编译失败是实现循环的一部分。读取 build 的第一处诊断及 raw_receipt_ref，形成具体修复，创建新 revision 并重建。进入下一类错误往往说明前一修复已生效，应继续定位；两次不同编译错误不是不可修复的证据。
@@ -40,8 +44,11 @@ __global__ __vector__ __aicore__ void entry(/* device arguments */);
 [compile]: https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/opdevg/Ascendcopdevg/atlas_ascendc_10_10077.html
 [constraints]: https://asc.gitcode.com/guide/programming_guide/compilation_and_execution/operator_compilation/constraints.html
 [kernel-type]: https://www.hiascend.com/document/detail/en/CANNCommunityEdition/900/API/ascendcopapi/atlasascendc_api_07_0218.html
+[kernel-entry]: https://www.hiascend.com/document/detail/en/CANNCommunityEdition/900/programug/Ascendcopdevg/atlas_ascendc_10_0014.html
 [round]: https://www.hiascend.com/doc_center/source/zh/canncommercial/80RC3/apiref/ascendcopapi/atlasascendc_api_07_0571.html
 [scalar-cast]: https://www.hiascend.com/document/detail/en/CANNCommunityEdition/850/API/ascendcopapi/atlasascendc_api_07_0018.html
 [cast]: https://www.hiascend.com/document/detail/en/CANNCommunityEdition/900/API/ascendcopapi/atlasascendc_api_07_0018.html
 [scalar-memory]: https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/900/programug/Ascendcopdevg/atlas_ascendc_10_00031.html
+[cache-control]: https://asc.gitcode.com/api/SIMD-API/basic_api/cache_control/DataCacheCleanAndInvalid.html
+[store-barrier]: https://www.hiascend.com/document/detail/en/canncommercial/850/API/ascendcopapi/atlasascendc_api_07_00188.html
 [add]: https://gitee.com/ascend/samples/blob/166b4a5204a70b6d000be6eedc101a1238aa2df2/operator/AddTemplateCustomSample/KernelLaunch/AddKernelInvocationNeo/add_custom.cpp

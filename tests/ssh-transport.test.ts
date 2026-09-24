@@ -45,6 +45,37 @@ process.stdin.on('end', () => {
       ]}}));
     return;
   }
+  if (${JSON.stringify(mode)} === 'incorrect-verify') {
+    console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:req.artifact_hash,rendered_source_hash:req.rendered_source_hash,
+      rows:req.cases.map(c=>({case_id:c.case_id,status:'INCORRECT',input_hash:c.input_hash,oracle_hash:c.oracle_hash,samples_us:[9,8,7,6,5],reason:'verify_case failed',
+        verify:{returncode:1,stderr:'',stdout:JSON.stringify({passed:false,y:{elements:1,mismatches:0,max_abs_error:0,first_mismatches:[]},yScale:{elements:16,mismatches:6,error_fraction:0.375,nonfinite_outputs:6,max_abs_error_finite:0,max_relative_error_finite:0}})},
+        device_execution:{status:'NOT_RUN',tool:'msprof',reason:'not collected because case did not pass functional execution'}}))}}));
+    return;
+  }
+  if (${JSON.stringify(mode)} === 'malformed-verify') {
+    const noisy = 'verify parser emitted text '.repeat(200);
+    console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:req.artifact_hash,rendered_source_hash:req.rendered_source_hash,
+      rows:req.cases.map(c=>({case_id:c.case_id,status:'INCORRECT',input_hash:c.input_hash,oracle_hash:c.oracle_hash,samples_us:[],reason:'verify_case failed',
+        verify:{returncode:1,stderr:'',stdout:noisy},
+        device_execution:{status:'NOT_RUN',tool:'msprof',reason:'not collected because case did not pass functional execution'}}))}}));
+    return;
+  }
+  if (${JSON.stringify(mode)} === 'verify-json-error') {
+    console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:req.artifact_hash,rendered_source_hash:req.rendered_source_hash,
+      rows:req.cases.map(c=>({case_id:c.case_id,status:'INCORRECT',input_hash:c.input_hash,oracle_hash:c.oracle_hash,samples_us:[],reason:'verify_case failed',
+        run:{returncode:0,stdout:'run ok',stderr:''},
+        verify:{returncode:1,stderr:'',stdout:JSON.stringify({passed:false,error:'output/yScale.bin contains nonfinite values'})},
+        device_execution:{status:'NOT_RUN',tool:'msprof',reason:'not collected because case did not pass functional execution'}}))}}));
+    return;
+  }
+  if (${JSON.stringify(mode)} === 'verify-json-unknown') {
+    console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:req.artifact_hash,rendered_source_hash:req.rendered_source_hash,
+      rows:req.cases.map(c=>({case_id:c.case_id,status:'INCORRECT',input_hash:c.input_hash,oracle_hash:c.oracle_hash,samples_us:[],reason:'verify_case failed',
+        run:{returncode:0,stdout:'run ok',stderr:''},
+        verify:{returncode:1,stderr:'',stdout:JSON.stringify({passed:false,unexpected:{why:'schema changed'}})},
+        device_execution:{status:'NOT_RUN',tool:'msprof',reason:'not collected because case did not pass functional execution'}}))}}));
+    return;
+  }
   if (${JSON.stringify(mode)} === 'pass-no-device' || ${JSON.stringify(mode)} === 'pass-device') {
     const proof = ${JSON.stringify(mode)} === 'pass-device' ? {status:'CONFIRMED',matched_tasks:[{device_id:0,op_name:'demo_device',task_type:'AI_CORE'}]} : undefined;
     console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:req.artifact_hash,rendered_source_hash:req.rendered_source_hash,
@@ -271,6 +302,71 @@ test('SshRunner rejects PASS rows without confirmed remote input and oracle hash
     mode: 'probe',
     case_ids: ['c1'],
   }), /Remote PASS input hash mismatch/);
+}));
+
+test('SshRunner appends bounded numeric verify diagnostics to failed rows', withFakeSsh('incorrect-verify', async root => {
+  const receipt = await new SshRunner().test({
+    project: projectWithCase(root),
+    build: completedBuild(root),
+    module: { ...module(), supported_case_ids: ['c1'] },
+    mode: 'full',
+  });
+  const row = receipt.rows[0];
+  assert.equal(row.status, 'INCORRECT');
+  assert.deepEqual(row.samples_us, []);
+  assert.match(row.reason ?? '', /verify_case failed/);
+  assert.match(row.reason ?? '', /yScale: .*mismatches=6/);
+  assert.match(row.reason ?? '', /error_fraction=0.375/);
+  assert.match(row.reason ?? '', /nonfinite_outputs=6/);
+  assert.match(row.reason ?? '', /max_abs_error_finite=0/);
+  assert.doesNotMatch(row.reason ?? '', /yScale: .*max_abs_error=0/);
+  assert((row.reason ?? '').length < 1200);
+  assert(receipt.raw_receipt_ref);
+  const raw = JSON.parse(readFileSync(join(root, receipt.raw_receipt_ref!), 'utf8'));
+  assert.equal(raw.rows[0].verify.stdout.includes('nonfinite_outputs'), true);
+}));
+
+test('SshRunner falls back to bounded raw verify output when diagnostics are malformed', withFakeSsh('malformed-verify', async root => {
+  const receipt = await new SshRunner().test({
+    project: projectWithCase(root),
+    build: completedBuild(root),
+    module: { ...module(), supported_case_ids: ['c1'] },
+    mode: 'full',
+  });
+  const reason = receipt.rows[0].reason ?? '';
+  assert.equal(receipt.rows[0].status, 'INCORRECT');
+  assert.match(reason, /verify_case failed/);
+  assert.match(reason, /verify output: verify parser emitted text/);
+  assert.match(reason, /truncated/);
+  assert(reason.length <= 1250);
+}));
+
+test('SshRunner summarizes valid verify JSON error before run fallback', withFakeSsh('verify-json-error', async root => {
+  const receipt = await new SshRunner().test({
+    project: projectWithCase(root),
+    build: completedBuild(root),
+    module: { ...module(), supported_case_ids: ['c1'] },
+    mode: 'full',
+  });
+  const reason = receipt.rows[0].reason ?? '';
+  assert.match(reason, /verify_case failed/);
+  assert.match(reason, /verify error: output\/yScale\.bin contains nonfinite values/);
+  assert.doesNotMatch(reason, /run returncode=0/);
+}));
+
+test('SshRunner preserves bounded valid but unknown verify JSON', withFakeSsh('verify-json-unknown', async root => {
+  const receipt = await new SshRunner().test({
+    project: projectWithCase(root),
+    build: completedBuild(root),
+    module: { ...module(), supported_case_ids: ['c1'] },
+    mode: 'full',
+  });
+  const reason = receipt.rows[0].reason ?? '';
+  assert.match(reason, /verify_case failed/);
+  assert.match(reason, /verify output: /);
+  assert.match(reason, /"unexpected"/);
+  assert.doesNotMatch(reason, /run returncode=0/);
+  assert(reason.length <= 1250);
 }));
 
 test('SSH timings and correct hashes alone do not prove device execution', withFakeSsh('pass-no-device', async root => {

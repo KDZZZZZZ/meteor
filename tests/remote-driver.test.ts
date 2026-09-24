@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
@@ -83,6 +83,38 @@ function makeCase() {
     files: Object.fromEntries(Object.entries(allFiles).map(([path, data]) => [path, { base64: b64(data), sha256: sha256(data) }])),
   };
 }
+
+test('verifier reports actual and expected scale mismatches without changing accuracy decisions', () => {
+  const root = mkdtempSync(join(tmpdir(), 'meteor-scale-diagnostics-'));
+  const fixture = makeCase();
+  for (const [path, record] of Object.entries(fixture.files)) {
+    const target = join(root, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, Buffer.from(record.base64, 'base64'));
+  }
+  mkdirSync(join(root, 'output'));
+  writeFileSync(join(root, 'output/y.bin'), readFileSync(join(root, 'golden/y.bin')));
+  const expectedScale = readFileSync(join(root, 'golden/yScale.bin')).readFloatLE();
+  for (const actual of [expectedScale, 1, NaN, Infinity, -Infinity]) {
+    const output = Buffer.alloc(4);
+    output.writeFloatLE(actual);
+    writeFileSync(join(root, 'output/yScale.bin'), output);
+    const result = spawnSync(python, [join(dirname(driver), 'verify_case.py'), root], { encoding: 'utf8' });
+    const report = JSON.parse(result.stdout);
+    const passed = actual === expectedScale;
+    assert.equal(result.status, passed ? 0 : 1, result.stderr);
+    assert.equal(report.passed, passed);
+    assert.equal(report.yScale.mismatches, passed ? 0 : 1);
+    assert.equal(report.yScale.nonfinite_outputs, Number.isFinite(actual) ? 0 : 1);
+    assert.equal(report.yScale.first_mismatches.length, passed ? 0 : 1);
+    if (!passed) {
+      const mismatch = report.yScale.first_mismatches[0];
+      assert.equal(mismatch.row, 0);
+      assert.equal(mismatch.expected, expectedScale);
+      assert.equal(mismatch.actual, Number.isFinite(actual) ? actual : Number.isNaN(actual) ? 'nan' : actual > 0 ? 'inf' : '-inf');
+    }
+  }
+});
 
 test('remote driver build/test is durable and idempotent with fake executable harness', async t => {
   const numpyCheck = spawnSync(python, ['-c', 'import numpy'], { encoding: 'utf8' });

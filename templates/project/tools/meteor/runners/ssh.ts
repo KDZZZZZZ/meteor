@@ -74,6 +74,57 @@ function failedBuildDiagnostic(result: any): string | undefined {
   if (output) parts.push(trimDiagnostic(output));
   return parts.join('\n');
 }
+function formatField(name: string, value: unknown): string | undefined {
+  return value === undefined || value === null ? undefined : `${name}=${String(value)}`;
+}
+function summarizeVerifyJson(report: any): string[] {
+  const parts: string[] = [];
+  if (typeof report?.error === 'string' && report.error.trim()) parts.push(`verify error: ${trimDiagnostic(report.error, 500)}`);
+  for (const name of ['y', 'yScale']) {
+    const section = report?.[name];
+    if (!section || typeof section !== 'object') continue;
+    const fields = [
+      formatField('mismatches', section.mismatches),
+      formatField('error_fraction', section.error_fraction),
+      formatField('nonfinite_outputs', section.nonfinite_outputs),
+      formatField('max_abs_error', section.max_abs_error),
+      formatField('max_abs_error_finite', section.max_abs_error_finite),
+      formatField('max_relative_error', section.max_relative_error),
+      formatField('max_relative_error_finite', section.max_relative_error_finite),
+    ].filter(Boolean);
+    if (Array.isArray(section.first_mismatches) && section.first_mismatches.length > 0) {
+      fields.push(`first_mismatch=${trimDiagnostic(JSON.stringify(section.first_mismatches[0]), 240)}`);
+    }
+    if (fields.length) parts.push(`${name}: ${fields.join(', ')}`);
+  }
+  return parts;
+}
+function rowFailureReason(remote: any): string | undefined {
+  const base = remote.reason === undefined ? undefined : String(remote.reason);
+  if (remote.status === 'PASS') return base;
+  const details: string[] = [];
+  const verify = remote.verify;
+  const stdout = typeof verify?.stdout === 'string' ? verify.stdout.trim() : '';
+  const stderr = typeof verify?.stderr === 'string' ? verify.stderr.trim() : '';
+  if (stdout) {
+    try {
+      const parsed = JSON.parse(stdout);
+      details.push(...summarizeVerifyJson(parsed));
+      if (!details.length) details.push(`verify output: ${trimDiagnostic(stdout, 900)}`);
+    } catch {
+      details.push(`verify output: ${trimDiagnostic(stdout, 900)}`);
+    }
+  }
+  if (!details.length && stderr) details.push(`verify stderr: ${trimDiagnostic(stderr, 900)}`);
+  const run = remote.run;
+  if (!details.length && run) {
+    const runError = String(run.stderr ?? '').trim() || String(run.stdout ?? '').trim();
+    const code = run.returncode === undefined ? 'unknown' : String(run.returncode);
+    details.push(`run returncode=${code}${runError ? `: ${trimDiagnostic(runError, 900)}` : ''}`);
+  }
+  if (!details.length) return base;
+  return trimDiagnostic([base, ...details].filter(Boolean).join('; '), 1200);
+}
 export async function remoteRequest(project: Project, request: any, signal?: AbortSignal): Promise<any> {
   signal?.throwIfAborted();
   const profile = loadSshProfile(project.config.execution.profile_ref);
@@ -212,7 +263,7 @@ export class SshRunner implements Runner {
       }
       const samples = remote.status === 'PASS' ? remote.samples_us : [];
       return { case_id: c.case_id, status: remote.status, samples_us: samples,
-        median_us: samples.length ? [...samples].sort((a:number,b:number)=>a-b)[Math.floor(samples.length/2)] : undefined, reason: remote.reason ?? undefined,
+        median_us: samples.length ? [...samples].sort((a:number,b:number)=>a-b)[Math.floor(samples.length/2)] : undefined, reason: rowFailureReason(remote),
         actual_kernel_ref: request.build.kernel_ref, source_hash: request.build.source_hash, input_hash: c.input_hash, oracle_hash: c.oracle_hash,
         device_execution: remote.device_execution };
     });
