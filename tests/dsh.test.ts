@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,9 +14,9 @@ function deferred<T = any>() {
   const promise = new Promise<T>(r => { resolve = r; });
   return { promise, resolve };
 }
-function harness() {
+function harness(options: { init?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'meteor-dsh-'));
-  initProject(root, { git: false, backend: 'mock' });
+  if (options.init !== false) initProject(root, { git: false, backend: 'mock' });
   const tools = new Map<string, any>();
   tools.set('skill', { name: 'skill' }); tools.set('read', { name: 'read' });
   tools.set('subagent', { name: 'subagent' }); tools.set('bash', { name: 'bash' });
@@ -74,6 +74,13 @@ function submission(researchId: string, sessionId: string) {
   };
 }
 
+test('chief can read files through meteor_read_file before project initialization', async () => {
+  const h = harness({ init: false });
+  writeFileSync(join(h.root, 'operator.json'), '{"abi":"qmq-v1"}\n');
+  assert.equal((await h.call('meteor_read_file', { path: 'operator.json' })).text, '{"abi":"qmq-v1"}\n');
+  await h.host.dispose();
+});
+
 test('one native run keeps research tools and skills in one session, and commits only its prepared final output', async () => {
   const h = harness();
   await assert.rejects(h.call('meteor_start', { goal: 'Investigate tiling', budget: { experiments: 3 } }), /budget\.experiments is not supported/);
@@ -87,6 +94,10 @@ test('one native run keeps research tools and skills in one session, and commits
   assert(!h.starts[0].toolFilter.allow.includes('subagent'));
   assert(!h.starts[0].toolFilter.allow.includes('bash'));
   assert.match(h.starts[0].prompt[0].text, /Seeds are inspiration only/);
+  const startup = JSON.parse(h.starts[0].prompt[0].text.split('\n').slice(1).join('\n'));
+  assert.equal(startup.contracts_ref, join(h.root, 'reports/meteor/mock/research/continuous/kernel-contracts.md'));
+  assert.match(readFileSync(startup.contracts_ref, 'utf8'), /KernelModule JSON/);
+  assert.match(readFileSync(startup.contracts_ref, 'utf8'), /supported_case_ids/);
   const outside = join(tmpdir(), `meteor-other-material-${Date.now()}.txt`);
   writeFileSync(outside, 'another research kernel');
   assert.equal((await h.call('meteor_read_file', { path: outside }, child)).text, 'another research kernel');
@@ -115,6 +126,18 @@ test('one native run keeps research tools and skills in one session, and commits
   assert.equal(report.research.research_goal_met, false);
   assert.equal(report.research.agent_session_id, child.id);
   assert.equal(h.starts.length, 1);
+  await h.host.dispose();
+});
+
+test('chief reads project files and child reads relative to its bound project root', async () => {
+  const h = harness();
+  writeFileSync(join(h.root, 'chief-visible.txt'), 'chief can read the project cwd');
+  assert.equal((await h.call('meteor_read_file', { path: 'chief-visible.txt' })).text, 'chief can read the project cwd');
+  const started = await h.call('meteor_start', { research_id: 'read-scope', goal: 'Verify read scope' });
+  const { child } = await h.childReady.promise;
+  assert.match((await h.call('meteor_read_file', { path: 'asc/operator.json' }, child)).text, /qmq-v1/);
+  await h.call('meteor_control', { research_id: 'read-scope', action: 'cancel' });
+  await h.jobs.get(started.job_id).done;
   await h.host.dispose();
 });
 
@@ -254,12 +277,40 @@ test('forged final submission cannot commit and partial reports survive abnormal
   await h.host.dispose();
 });
 
-test('child writes cannot mutate evidence, snapshots, other research, or traverse out of drafts', () => {
-  const root = join(tmpdir(), 'meteor-write-boundary');
-  assert.equal(writablePath(root, 'drafts/k/r1/device.asc'), join(root, 'drafts/k/r1/device.asc'));
-  for (const path of ['manifest.json', 'experiments/e1/full-tests/forged.json', 'snapshot/tools/meteor/submit.ts', '../another/memory.md', 'drafts/../../escape']) {
-    assert.throws(() => writablePath(root, path), /limited|escapes/);
+test('child writes accept research, project and absolute paths for the current writable research only', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'meteor-write-boundary-'));
+  const root = join(projectRoot, 'reports/meteor/mock/research/current');
+  mkdirSync(root, { recursive: true });
+  const hypothesis = join(root, 'hypothesis.json');
+  const projectRelative = relative(projectRoot, hypothesis).replace(/\\/g, '/');
+  assert.equal(writablePath(root, 'hypothesis.json', projectRoot), hypothesis);
+  assert.equal(writablePath(root, projectRelative, projectRoot), hypothesis);
+  assert.equal(writablePath(root, hypothesis, projectRoot), hypothesis);
+
+  const blocked = [
+    'manifest.json',
+    'experiments/e1/full-tests/forged.json',
+    'snapshot/tools/meteor/submit.ts',
+    'evidence/raw.json',
+    '../another/memory.md',
+    'drafts/../../escape',
+    'reports/meteor/mock/research/other/hypothesis.json',
+    'reports/meteor/mock/research/current/snapshot/tools/meteor/submit.ts',
+    'reports/meteor/mock/research/current/evidence/raw.json',
+  ];
+  for (const path of blocked) {
+    assert.throws(() => writablePath(root, path, projectRoot), /limited|escapes|Examples/);
   }
+});
+
+test('child write path guard rejects symbolic link traversal', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'meteor-write-symlink-'));
+  const root = join(projectRoot, 'reports/meteor/mock/research/current');
+  const outside = join(projectRoot, 'outside');
+  mkdirSync(root, { recursive: true });
+  mkdirSync(outside, { recursive: true });
+  symlinkSync(outside, join(root, 'drafts'), 'junction');
+  assert.throws(() => writablePath(root, 'drafts/k/r1/device.asc', projectRoot), /symbolic links/);
 });
 
 test('registered tools enforce session ownership and argument contracts', async () => {

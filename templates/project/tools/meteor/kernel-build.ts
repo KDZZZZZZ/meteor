@@ -104,9 +104,12 @@ export async function buildKernel(project: Project, input: BuildKernelInput): Pr
   input = { ...input, kernel_path: projectRef(project, inside(project.root, slash(input.kernel_path).replace(/\/kernel\.json$/, '').replace(/\/$/, ''))) };
   input.signal?.throwIfAborted();
   assertResearchActive(project, input.research_id, input.experiment_id);
+  const modulePath = inside(project.root, `${input.kernel_path}/kernel.json`);
+  if (!existsSync(modulePath)) throw new Error(`Kernel manifest missing: ${modulePath}. Create kernel.json and its declared device/host sources in your research drafts, then retry this experiment with the written module path. No device build or experiment receipt was produced.`);
   const module = readKernelModule(project, input.kernel_path);
-  const missing = [module.device_file, module.host_file].filter(path => typeof path !== 'string' || !existsSync(inside(project.root, path)));
-  if (missing.length) throw new Error(`Kernel source files missing: ${missing.join(', ')}. Write the declared device and host sources, then retry this experiment. No device build or experiment receipt was produced.`);
+  const declaredSources = [module.device_file, module.host_file, ...module.dependencies.map(dep => dep.path)];
+  const missing = declaredSources.filter(path => typeof path !== 'string' || !existsSync(inside(project.root, path)));
+  if (missing.length) throw new Error(`Kernel source files missing: ${missing.join(', ')}. Write the declared device, host and dependency sources, then retry this experiment. No device build or experiment receipt was produced.`);
   assertDeviceKernelSource(project, module);
   const rendered = renderSingleKernel(project, module, {
     assembly_key: `${input.research_id}-${input.experiment_id}-${module.kernel_id}-${module.revision}`,

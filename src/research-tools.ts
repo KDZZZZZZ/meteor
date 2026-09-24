@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { MeteorHost, object, text } from './host.ts';
 import type { ActiveResearch, DshContext, ToolExecution } from './host.ts';
@@ -108,16 +108,17 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
   const definitions = [
     defineTool('meteor_read_file', 'Read any accessible file or list a directory. Seeds do not restrict what you can read. Paths are relative to the project unless absolute.',
       { path: string, offset: { type: 'integer', minimum: 0, description: 'Zero-based character offset, not a line number.' }, limit: { type: 'integer', minimum: 1, maximum: 100000, description: 'Maximum characters to return.' } }, ['path'], (args, exec) => {
-        const state = host.requireResearch(exec); const path = resolve(state.project.root, args.path);
+        const state = exec.agent && host.sessions.get(exec.agent.id);
+        const path = resolve(state ? host.requireResearch(exec).project.root : host.root(host.chief(exec)), args.path);
         if (lstatSync(path).isDirectory()) return { path, entries: readdirSync(path, { withFileTypes: true }).map(d => ({ name: d.name, directory: d.isDirectory() })) };
         const content = readFileSync(path, 'utf8'); const offset = args.offset ?? 0; const limit = args.limit ?? 30000;
         return { path, offset, total_characters: content.length, text: content.slice(offset, offset + limit) };
       }),
-    defineTool('meteor_write_file', 'Write this research’s hypothesis, plans, drafts, analysis or memory. path is relative to the research directory. Tool-produced evidence, snapshots and shared files are immutable here.',
+    defineTool('meteor_write_file', 'Write this research’s hypothesis, plans, drafts, analysis or memory. Prefer research-relative paths such as hypothesis.json or drafts/k/r1/device.asc; project-relative and absolute paths to the same writable research area are also accepted. Tool-produced evidence, snapshots and shared files are immutable here.',
       { path: string, content: { type: 'string' }, mode: { type: 'string', enum: ['write', 'append'] } }, ['path', 'content'], (args, exec) => {
         const state = host.requireResearch(exec);
         const root = host.researchDir(state.project, state.id);
-        const target = writablePath(root, args.path);
+        const target = writablePath(root, args.path, state.project.root);
         state.preparedIds.clear();
         mkdirSync(dirname(target), { recursive: true });
         if (args.mode === 'append') appendFileSync(target, args.content); else writeFileSync(target, args.content);
@@ -204,14 +205,31 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
   return definitions.map(definition => ctx.tools.register(definition));
 }
 
-export function writablePath(root: string, input: string): string {
-  const target = resolve(root, text(input, 'path'));
-  const path = relative(root, target).split(sep).join('/');
+export function writablePath(root: string, input: string, projectRoot?: string): string {
+  const raw = text(input, 'path');
+  const base = resolve(root);
+  const projectBase = projectRoot === undefined ? undefined : resolve(projectRoot);
+  const candidates = isAbsolute(raw)
+    ? [resolve(raw)]
+    : [resolve(base, raw), ...(projectBase === undefined ? [] : [resolve(projectBase, raw)])];
+  for (const target of [...new Set(candidates)]) {
+    const nativePath = relative(base, target);
+    if (!nativePath || nativePath.split(sep).some(p => p === '..') || isAbsolute(nativePath)) continue;
+    const path = nativePath.split(sep).join('/');
+    if (allowedWritablePath(path)) return assertWritablePath(base, target);
+  }
+  throw new Error('Writes are limited to this research’s drafts, plans, analysis and memory. Examples: memory.md, hypothesis.json, drafts/<kernel>/<revision>/kernel.json, experiments/<experiment_id>/analysis.json, or the same path under this project’s reports/meteor/<backend>/research/<research_id>/ directory.');
+}
+
+function allowedWritablePath(path: string): boolean {
   const allowed = /^(hypothesis\.json|memory\.md|checkpoint\.json|material_refs\.jsonl|submission-draft\.json)$/.test(path)
     || /^hypothesis_history\/[^/]+\.json$/.test(path)
     || /^drafts\/.+/.test(path)
     || /^experiments\/[^/]+\/(plan\.json|analysis\.json)$/.test(path);
-  if (!allowed || path.split('/').some(p => p === '..') || !path) throw new Error('Writes are limited to this research’s drafts, plans, analysis and memory');
+  return allowed && !path.split('/').some(p => p === '..') && !!path;
+}
+
+function assertWritablePath(root: string, target: string): string {
   let cursor = target;
   while (cursor !== root) {
     if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink()) throw new Error('Research writes cannot traverse symbolic links');

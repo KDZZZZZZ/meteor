@@ -74,7 +74,7 @@ function validateSuite(project: Project): void {
 function validateModule(module: KernelModule, project: Project): void {
   assert(module.operator_abi === project.suite.operator_abi, `Module ${module.kernel_id}@${module.revision} ABI does not match suite`);
   validatePrefix(module.symbol_prefix);
-  assert(module.launcher === `${module.symbol_prefix}launch`, `Launcher must be the immutable prefix launch symbol`);
+  assert(module.launcher === `${module.symbol_prefix}launch`, `Launcher mismatch: symbol_prefix ${JSON.stringify(module.symbol_prefix)} requires launcher ${JSON.stringify(`${module.symbol_prefix}launch`)}, got ${JSON.stringify(module.launcher)}. Concatenate the prefix and "launch" exactly; include any separator in symbol_prefix. Make the manifest and host function agree, then retry.`);
   const knownCases = new Set(project.suite.cases.map(item => item.case_id));
   const seenSupported = new Set<string>();
   for (const caseId of module.supported_case_ids) {

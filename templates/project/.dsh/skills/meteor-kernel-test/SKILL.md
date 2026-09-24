@@ -41,13 +41,15 @@ Chief 负责维护仓库，功能分支使用 `<type>/<kebab>` 命名；`main`/`
 
 研究 Agent 在原 session 内决定调用顺序和实验参数；测试过程不另建 Agent、不触发分桶、不决定假设真假。
 
-先读算子约定、硬件报告、模块接口和测试模板，再按具体缺口查找少量相关 kernel 或官方示例。有了足以执行的假设就保存计划并做第一个实验；按工具 schema 填参数，无需通读提交校验或数据库源码。后续检索围绕具体编译错误、正确性差异或机制问题展开。长源码分文件或分段写入，保持原会话中的实验计划和记忆。
+按启动包给出的实际 `contracts_ref`、`operator_contract_ref`、`kernel_template_ref` 和 case suite 路径读取模块接口、算子约定与测试模板，核对硬件报告；不要猜文件名。再按具体缺口查找少量相关 kernel 或官方示例。有了足以执行的假设就保存计划并做第一个实验；按工具 schema 填参数，无需通读提交校验或数据库源码。后续检索围绕具体编译错误、正确性差异或机制问题展开。长源码分文件或分段写入，保持原会话中的实验计划和记忆。
 
-初始库为空时自行构造符合 ABI 的最小设备基线，优先参考官方实现。先实际调用 build，根据编译与正确性结果迭代；计划和文档不能替代实验。每个预测与推荐范围都核对当前 case-suite 的真实 shape，超出 suite 的尺寸只能列为后续待验证范围。预算未耗尽且仍有可行实验时继续本轮，不能仅以“尚未实现”“时间有限”交回空结果；外部阻塞应有具体失败证据。
+初始库为空时自行编写符合 ABI 的最小设备基线，优先参考官方实现。用 `meteor_write_file` 创建本轮 `drafts/<kernel>/<revision>/kernel.json`、`device.asc`、`host.asc`；源码是研究 Agent 的交付工作，缺文件时自行补齐。`meteor_write_file.path` 相对本轮研究目录，其返回值给出实际路径；`meteor_kernel_build.kernel_path` 使用该模块的实际目录或清单路径。文件全部写入后实际调用 build，根据编译与正确性结果迭代；计划和文档不能替代实验。每个预测与推荐范围都核对当前 case-suite 的真实 shape，超出 suite 的尺寸只能列为后续待验证范围。预算未耗尽且仍有可行实验时继续本轮，不能仅以“尚未实现”“时间有限”交回空结果；外部阻塞应有具体失败证据。
 
 1. 核对 chief 的启动输入、原假设和实验计划，固定 research_id、experiment_id、kernel revision、case_suite、oracle、环境与测量协议。补齐给定假设的实验定义；实质修订时保留原文、原因和原假设状态，不以修订成立替代原目标的验证。
-2. 保存模块 kernel.json/device.asc/host.asc，确认清单引用的源码文件已全部写入后再构建。缺少 host/device 文件或路径写错时，补齐文件并在同一实验内重试；这类输入错误未形成一次设备实验，不能据此认定实验预算耗尽。目标计算在 AI Core/Vector 上实现，Host 负责调度与输入准备；禁止 CPU/NEON 替算、占位 device kernel 和跨实现 fallback。源码或依赖变化时创建新 revision。
+2. 保存模块 kernel.json/device.asc/host.asc，确认清单引用的源码文件、launcher 函数、设备计算及 launch 调用均已实际实现后再构建。只含 TODO/注释的文件仍是未实现，不能靠它制造编译失败作为停止依据。缺少 host/device 文件或路径写错时，补齐文件并在同一实验内重试；这类输入错误未形成一次设备实验，不能据此认定实验预算耗尽。目标计算在 AI Core/Vector 上实现，Host 负责调度与输入准备；禁止 CPU/NEON 替算、占位 device kernel 和跨实现 fallback。源码或依赖变化时创建新 revision。
 3. 调用 `meteor_kernel_build`，输入 experiment_id、kernel_path；kernel_path 可指模块目录或 kernel.json，research_id 由宿主绑定当前 session。检查 source_hash、artifact_hash、模块身份、硬件/编译目标、simulated 标记与构建状态。
+
+   构建失败时读取诊断和 raw_receipt_ref，修复第一处具体错误并以新 revision 重建。例如 launcher 未声明时实现清单声明的 ABI 函数和实际设备调用；这是候选代码的开发工作，不能报告成工具链不支持该算子。预算还有余量时继续迭代。
 4. 可调用 `meteor_kernel_test` 的 probe 模式调试选定 case。probe 不替代 full。
 5. 调用 full 模式独立执行这个 revision 的 case 全集。检查每个 case 的 PASS/INCORRECT/UNSUPPORTED/RESOURCE_REJECTED/RUN_FAILED/TIMEOUT/NOT_RUN、原因、实际实现身份、原始样本和 input/oracle hash。
 6. UNSUPPORTED 是显式终态，不运行其它 kernel 代替。正确性通过且有效执行才能记录计时。accounting_complete 与支持/计时 case 数量分别核对。“全尺寸”是固定 suite 全集；它不覆盖未列出的 shape，不能将几个离散 case 写成其整个包围区间已验证。

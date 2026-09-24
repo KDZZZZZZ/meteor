@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -35,6 +35,14 @@ process.stdin.on('end', () => {
   }
   if (${JSON.stringify(mode)} === 'pass-missing-hash') {
     console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:req.artifact_hash,rendered_source_hash:req.rendered_source_hash,rows:[{case_id:'c1',status:'PASS',samples_us:[1,2,3,4,5]}]}}));
+    return;
+  }
+  if (${JSON.stringify(mode)} === 'build-failed-logs') {
+    console.log(JSON.stringify({ok:true,result:{status:'FAILED',backend:'ssh',simulated:false,artifact_hash:'',remote_build_id:req.build_id,rendered_source_hash:req.rendered_source_hash,
+      logs:[
+        {command:['cmake','-S','/tmp/source','-B','/tmp/build'],returncode:0,stdout:'configured',stderr:''},
+        {command:['cmake','--build','/tmp/build','--target','qmq_remote_main','-j2'],returncode:2,stdout:'[ 50%] Building ASC object',stderr:"kernel.asc:7:2: error: use of undeclared identifier 'qmq_vec_r1_launch'\\nmake: *** [qmq_remote_main] Error 2"}
+      ]}}));
     return;
   }
   if (${JSON.stringify(mode)} === 'pass-no-device' || ${JSON.stringify(mode)} === 'pass-device') {
@@ -219,9 +227,29 @@ test('SshRunner accepts real remote build identity and hashes', withFakeSsh('rea
   assert.equal(receipt.status, 'COMPLETED');
   assert.equal(receipt.execution_backend, 'ssh');
   assert.equal(receipt.simulated, false);
+  assert.equal(receipt.error, undefined);
   assert.equal(receipt.artifact_hash, 'b'.repeat(64));
   assert.equal(receipt.rendered_source_hash, buildRequest(root).rendered_source_hash);
   assert.match(receipt.remote_build_id ?? '', /^[a-f0-9]{64}$/);
+}));
+
+test('SshRunner surfaces bounded compiler diagnostics from failed remote build logs', withFakeSsh('build-failed-logs', async root => {
+  const request = buildRequest(root);
+  const receipt = await new SshRunner().build(request);
+  assert.equal(receipt.status, 'FAILED');
+  assert.equal(receipt.execution_backend, 'ssh');
+  assert.equal(receipt.simulated, false);
+  assert.equal(receipt.research_id, request.research_id);
+  assert.equal(receipt.experiment_id, request.experiment_id);
+  assert.match(receipt.remote_build_id ?? '', /^[a-f0-9]{64}$/);
+  assert.match(receipt.error ?? '', /cmake --build .*qmq_remote_main/);
+  assert.match(receipt.error ?? '', /exit 2/);
+  assert.match(receipt.error ?? '', /qmq_vec_r1_launch/);
+  assert((receipt.error ?? '').length < 5000);
+  assert(receipt.raw_receipt_ref);
+  const raw = JSON.parse(readFileSync(join(root, receipt.raw_receipt_ref!), 'utf8'));
+  assert.equal(raw.logs[1].stderr.includes('qmq_vec_r1_launch'), true);
+  assert.equal(existsSync(join(root, receipt.raw_receipt_ref!)), true);
 }));
 
 test('SshRunner uses fresh random request ids unless idempotency_key is supplied', withFakeSsh('real', async (root, logPath) => {

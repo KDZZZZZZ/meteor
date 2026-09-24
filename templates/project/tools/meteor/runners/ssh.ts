@@ -59,6 +59,21 @@ function normalizeRemoteStatus(status: string): 'COMPLETED' | 'FAILED' | 'UNKNOW
 function releaseConfirmed(result: any): boolean {
   return result?.remote_release_confirmed === true || result?.remote_released === true || result?.status === 'COMPLETED' || result?.status === 'FINISHED';
 }
+function trimDiagnostic(value: unknown, limit = 3500): string {
+  const text = String(value ?? '').trim();
+  if (text.length <= limit) return text;
+  return text.slice(0, limit) + `\n[truncated ${text.length - limit} characters]`;
+}
+function failedBuildDiagnostic(result: any): string | undefined {
+  if (result.error ?? result.reason) return result.error ?? result.reason;
+  const log = Array.isArray(result.logs) ? result.logs.find((entry: any) => Number(entry?.returncode ?? 0) !== 0) : undefined;
+  if (!log) return undefined;
+  const command = Array.isArray(log.command) ? log.command.map((part: unknown) => String(part)).join(' ') : String(log.command ?? 'unknown');
+  const output = String(log.stderr ?? '').trim() || String(log.stdout ?? '').trim();
+  const parts = [`Remote build failed during command (exit ${log.returncode}): ${trimDiagnostic(command, 600)}`];
+  if (output) parts.push(trimDiagnostic(output));
+  return parts.join('\n');
+}
 export async function remoteRequest(project: Project, request: any, signal?: AbortSignal): Promise<any> {
   signal?.throwIfAborted();
   const profile = loadSshProfile(project.config.execution.profile_ref);
@@ -162,7 +177,7 @@ export class SshRunner implements Runner {
       source_hash: request.source_hash, artifact_hash: result.artifact_hash ?? '', environment_ref: request.project.config.environment.environment_ref,
       execution_backend: 'ssh', simulated: false, status, source_ref: request.kernel_path, module_ref: request.kernel_path + '/kernel.json',
       rendered_source_hash: request.rendered_source_hash, remote_build_id: remoteId, remote_request_id: result.request_id,
-      raw_receipt_ref: ref, remote_release_confirmed: releaseConfirmed(result), error: result.error ?? result.reason };
+      raw_receipt_ref: ref, remote_release_confirmed: releaseConfirmed(result), error: status === 'COMPLETED' ? undefined : failedBuildDiagnostic(result) };
   }
   async test(request: TestRequest): Promise<TestReceipt> {
     assert(request.fixture === undefined, 'Mock fixtures cannot be used with SSH');

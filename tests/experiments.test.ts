@@ -111,6 +111,20 @@ test('mock full test writes deterministic complete receipt with explicit unsuppo
   assert.equal(receipt.build_ref, buildRef);
 });
 
+test('missing candidate manifest reports how to create it without consuming an experiment', async () => {
+  const project = makeProject();
+  project.config.budget.max_experiments = 1;
+  activate(project, 'repair-missing-manifest');
+  const manifestPath = join(project.root, 'kernels/demo/r1/kernel.json');
+  const manifest = readFileSync(manifestPath, 'utf8');
+  rmSync(manifestPath);
+  const input = { research_id: 'repair-missing-manifest', experiment_id: 'e1', kernel_path: 'kernels/demo/r1/kernel.json' };
+  await assert.rejects(buildKernel(project, input), /manifest missing:.*kernel\.json.*Create kernel\.json.*retry this experiment/);
+  assert.equal(existsSync(join(project.dataRoot, 'research', input.research_id, 'experiments')), false);
+  writeFileSync(manifestPath, manifest);
+  assert.equal((await buildKernel(project, input)).status, 'COMPLETED');
+});
+
 test('missing candidate sources report how to repair without consuming an experiment', async () => {
   const project = makeProject();
   project.config.budget.max_experiments = 1;
@@ -122,6 +136,20 @@ test('missing candidate sources report how to repair without consuming an experi
   await assert.rejects(buildKernel(project, input), /source files missing:.*host\.asc.*retry this experiment/);
   assert.equal(existsSync(join(project.dataRoot, 'research', input.research_id, 'experiments')), false);
   writeFileSync(hostPath, hostSource);
+  assert.equal((await buildKernel(project, input)).status, 'COMPLETED');
+});
+
+test('missing candidate dependency reports how to repair without consuming an experiment', async () => {
+  const project = makeProject();
+  project.config.budget.max_experiments = 1;
+  activate(project, 'repair-missing-dependency');
+  const dependencyPath = join(project.root, 'common/shared.inc');
+  const dependencySource = readFileSync(dependencyPath, 'utf8');
+  rmSync(dependencyPath);
+  const input = { research_id: 'repair-missing-dependency', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
+  await assert.rejects(buildKernel(project, input), /source files missing:.*common\/shared\.inc.*dependency sources.*retry this experiment/);
+  assert.equal(existsSync(join(project.dataRoot, 'research', input.research_id, 'experiments')), false);
+  writeFileSync(dependencyPath, dependencySource);
   assert.equal((await buildKernel(project, input)).status, 'COMPLETED');
 });
 
@@ -224,6 +252,8 @@ test('assembly renders template slots without rewriting module symbols', () => {
   assert.match(single, /const int64_t m64 = call\.info_x1\.tensors\[0\]\.shape\[0\];/);
   assert.match(single, /status = demo_launch\(call, shape, resources\);/);
   assert.doesNotMatch(single, /\{\{/);
+  assert.throws(() => renderSingleKernel(project, { ...module, symbol_prefix: 'demo' }),
+    /symbol_prefix "demo" requires launcher "demolaunch", got "demo_launch"/);
 
   const version = renderVersion(project, {
     assembly_key: 'version-test',

@@ -76,11 +76,14 @@ try {
   assert(!chiefSkill.content.includes('PARENT_SKILL_ONLY'), 'The current Meteor project must beat the parent Git root');
   assert(tools.schemas(chief).some(tool => tool.name === 'meteor_start'), 'Chief must receive the native start tool schema');
   let childResolve;
+  let childStartupPrompt;
   const childReady = new Promise(resolveChild => { childResolve = resolveChild; });
   const stepGate = new Promise(resolveGate => { releaseStep = resolveGate; });
   const chiefMessages = [];
   ctx.on('agent/pre-step', async payload => {
     if (payload.agent.session.header.origin === 'subagent') {
+      childStartupPrompt ??= (payload.messages ?? []).flatMap(message => message.content ?? [])
+        .find(block => block.type === 'text' && typeof block.text === 'string' && block.text.startsWith('METEOR_RESEARCH '))?.text;
       childResolve(payload.agent);
       await stepGate;
     } else chiefMessages.push(...payload.messages ?? []);
@@ -108,6 +111,11 @@ try {
   const seed = JSON.parse(readFileSync(join(project, 'reports/meteor/mock/research/web-contract/seed.json'), 'utf8'));
   assert.equal(seed.mode, 'specified');
   assert.equal(seed.selected.length, 1);
+  assert(childStartupPrompt, 'Child startup package must include the METEOR_RESEARCH contract block');
+  const startup = JSON.parse(childStartupPrompt.split('\n').slice(1).join('\n'));
+  assert.equal(startup.contracts_ref, join(project, 'reports/meteor/mock/research/web-contract/kernel-contracts.md'));
+  assert(readFileSync(startup.contracts_ref, 'utf8').includes('KernelModule JSON'), 'Child contracts_ref must point to generated readable KernelModule contract');
+  assert(!startup.contracts_ref.includes('snapshot'), 'Child must not depend on optional bundled snapshot contract files');
   const material = await call('meteor_read_file', { path: seed.selected[0].source_refs[0] }, child);
   assert.equal(material.text, readFileSync(join(project, 'asc/operator.json'), 'utf8'));
   const skill = await child.ctx.get('skills').get('meteor-kernel-test', { scope: child, cwd: project, signal });
@@ -133,7 +141,7 @@ try {
   const delivered = result.result ?? JSON.stringify(chiefMessages);
   assert.match(delivered, /hypothesis_verdict/);
   assert(delivered.includes(child.id));
-  console.log(JSON.stringify({ version, verified: ['web-preset', 'chief-skill-discovery', 'init-catalog-refresh', 'nested-project-overrides', 'chief-assigned-context', 'scoped-skills', 'frozen-prompt-snapshot', 'native-compaction', 'same-session-subagent', 'structured-output', 'job-cancel', 'job-result'], model_requests: 0 }));
+  console.log(JSON.stringify({ version, verified: ['web-preset', 'chief-skill-discovery', 'init-catalog-refresh', 'nested-project-overrides', 'chief-assigned-context', 'generated-kernel-contracts', 'scoped-skills', 'frozen-prompt-snapshot', 'native-compaction', 'same-session-subagent', 'structured-output', 'job-cancel', 'job-result'], model_requests: 0 }));
 } finally {
   releaseStep?.();
   await handle?.dispose();

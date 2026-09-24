@@ -63,6 +63,48 @@ function compactionFor(ctx: DshContext, agent: Agent): unknown {
   return presets?.serviceFor(agent, 'compaction')
     ?? agentService(agent, 'compaction');
 }
+function kernelContractsDocument(): string {
+  return `# Meteor Kernel Contracts
+
+This file is generated for the active research snapshot. Treat it as read-only reference material.
+
+## KernelModule JSON
+
+Write one kernel module manifest as \`kernel.json\` under \`research_directory/drafts/<kernel>/<revision>/\`.
+File paths inside \`kernel.json\` are relative to \`project_root\`.
+
+\`\`\`json
+{
+  "kernel_id": "short-stable-name",
+  "revision": "r1",
+  "operator_abi": "qmq-v1",
+  "symbol_prefix": "short_prefix_",
+  "launcher": "short_prefix_launch",
+  "device_file": "reports/meteor/<backend>/research/<research_id>/drafts/<kernel>/<revision>/device.asc",
+  "host_file": "reports/meteor/<backend>/research/<research_id>/drafts/<kernel>/<revision>/host.asc",
+  "supported_case_ids": ["case-id-from-case_suite"],
+  "dependencies": [],
+  "hardware_scope": "hardware and shape scope this revision was designed for",
+  "resource_constraints": []
+}
+\`\`\`
+
+Required fields mirror the runtime \`KernelModule\` interface:
+
+- \`kernel_id\` and \`revision\`: identify this exact candidate.
+- \`operator_abi\`: use \`qmq-v1\` for the bundled operator contract.
+- \`symbol_prefix\`: prefix for exported candidate symbols; keep it unique per revision.
+- \`launcher\`: exactly \`symbol_prefix + "launch"\`, including only separators already present in the prefix. For example, \`short_prefix_\` requires \`short_prefix_launch\`. Implement this symbol in \`host_file\` with the signature in \`kernel_template_ref\`.
+- \`device_file\` and \`host_file\`: candidate source files, relative to \`project_root\`.
+- \`supported_case_ids\`: fixed-suite case ids this candidate claims to support.
+- \`dependencies\`: optional shared source dependencies, each with \`id\`, \`path\`, \`sha256\`, and \`kind\` of \`preamble\` or \`shared\`.
+- \`hardware_scope\`: concise hardware and shape domain intended for this revision.
+- \`resource_constraints\`: known limits such as memory, alignment, or unsupported shapes.
+
+Read \`operator_contract_ref\`, \`kernel_template_ref\`, and \`case_suite\` from the startup package before writing a candidate.
+Use \`meteor_write_file\` to create sources, \`meteor_kernel_build\` for one exact revision, and \`meteor_kernel_test\` with \`mode: "full"\` before submitting any kernel.
+`;
+}
 
 export class MeteorHost {
   readonly ctx: DshContext;
@@ -208,11 +250,13 @@ export class MeteorHost {
       const record = state.runtime.research.getResearch(state.project, state.id);
       const seedPath = resolve(runRoot, 'seed.json');
       if (!existsSync(seedPath)) writeFileSync(seedPath, JSON.stringify(await state.runtime.sampling.selectInitialMaterials(state.project, record.initial_context), null, 2) + '\n', { flag: 'wx' });
+      const contractsPath = resolve(runRoot, 'kernel-contracts.md');
+      if (!existsSync(contractsPath)) writeFileSync(contractsPath, kernelContractsDocument(), { flag: 'wx' });
       const prompt = `METEOR_RESEARCH ${state.id} ${state.token}\n` + JSON.stringify({
         research_id: state.id, goal: record.goal,
         initial_context: record.initial_context, assigned_hypothesis: record.assigned_hypothesis ?? null,
         project_root: state.project.root, research_directory: runRoot,
-        contracts_ref: resolve(snapshot, 'tools/meteor', existsSync(resolve(snapshot, 'tools/meteor/contracts.ts')) ? 'contracts.ts' : 'contracts.md'),
+        contracts_ref: contractsPath,
         manifest_ref: resolve(runRoot, 'manifest.json'),
         kernel_template_ref: resolve(snapshot, 'asc/kernel_test.asc.tmpl'),
         operator_contract_ref: resolve(snapshot, 'asc/operator.json'),
