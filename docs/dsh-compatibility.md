@@ -79,6 +79,8 @@ The patch only selects the Meteor plugin for that invocation. Existing DSH model
 
 ## Web UI and centralized credentials
 
+Configure the provider, API key and default model in DSH's Web UI. Keep `llm-pi-ai` and `agent-default-model` out of home or command-line patches: those overlays take precedence over the editable Profile and can make saves fail with `Configuration for "llm-pi-ai" is overridden by a home patch or command-line overlay`. The Web launcher (`scripts/live-e2e.mjs ... --web`) starts without requesting an API key; it reuses DSH's saved configuration. Headless live tests can still receive `METEOR_E2E_API_KEY` through the environment or hidden terminal input.
+
 For remote Web UI access, bind DSH to loopback and place Tailscale Serve in front of it. Add the exact external `host:port` with `--trusted-host`, and use `--no-open` for a supervised launch. For example:
 
 ```text
@@ -89,7 +91,7 @@ The proxy must preserve Host, Origin and cookies, and forward WebSocket upgrades
 
 Each DSH process prints a root URL containing a fresh launch token. A browser visits `/?token=<launch-token>` once, receives an authority-bound signed cookie, and follows a `303` redirect to the clean URL. Cookie authority includes hostname and port, so local and Tailscale addresses each require their own initial exchange. Cookie lifetime defaults to 30 days. The signing record is stored centrally by DSH in `$DSH_HOME/.credentials.yaml`; existing cookies can survive a normal restart even though the launch token changes. There is no fixed launch-token configuration. [Authentication implementation](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/client/connection/src/browser-auth.ts#L161-L297).
 
-The launcher keeps login-token handling separate from published clean URLs and redacts tokenized URLs from diagnostic output. Do not copy API keys, SSH keys, DSH credential files or launch-token files into the project, snapshots or reports. Model configuration names an `apiKeyEnv` reference; SSH configuration names a centralized profile and system SSH alias. Use the installed browse directory picker pair in place of `directory-picker-auto` when the browser runs on another device; a native Windows picker opens on the host desktop.
+The launcher keeps login-token handling separate from published clean URLs and redacts tokenized URLs from diagnostic output. Do not copy API keys, SSH keys, DSH credential files or launch-token files into the project, snapshots or reports. Manage model credentials centrally through DSH; scripted live tests can use an `apiKeyEnv` reference. SSH configuration names a centralized profile and system SSH alias. Use the installed browse directory picker pair in place of `directory-picker-auto` when the browser runs on another device; a native Windows picker opens on the host desktop.
 
 On the first applicable upgrade, DSH renames `settings.yaml` to `settings.yaml.imported` and attempts to import its sections into the current Profile's plugin configuration. It does not expand `apiKeyEnv` or copy the credentials store. It also does not extract inline secrets from arbitrary old plugin settings: any such accepted field can remain in both the renamed input and the Profile. Keep credentials referenced through their existing central store or launch environment. [Settings migration](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/settings/settings/src/index.ts#L238-L259).
 

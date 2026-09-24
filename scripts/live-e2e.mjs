@@ -1,5 +1,5 @@
-// Explicitly invoked live test runner. Secrets enter through stdin or environment,
-// stay in child process memory, and are removed from all captured output.
+// Explicitly invoked live test runner. Web mode uses DSH's editable configuration.
+// Optional test secrets enter through stdin or environment and stay out of reports.
 import { spawn } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
@@ -8,8 +8,9 @@ const [rootArg, dshEntry, patch, promptFile, ...extraArgs] = process.argv.slice(
 if (!rootArg || !dshEntry || !patch || !promptFile) throw new Error('Usage: live-e2e.mjs root dshEntry patch promptFile|--web');
 const root = resolve(rootArg);
 mkdirSync(join(root, 'reports', 'live-dsh'), { recursive: true });
+const web = promptFile === '--web';
 let key = process.env.METEOR_E2E_API_KEY;
-if (!key) {
+if (!key && !web) {
   if (!process.stdin.isTTY) throw new Error('Use a TTY for hidden key input, or set METEOR_E2E_API_KEY');
   process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -30,12 +31,12 @@ if (!key) {
     process.stdin.on('data', receive);
   });
 }
-const clean = text => text.split(key).join('[redacted]').replace(/sk-[A-Za-z0-9_-]{12,}/g, '[redacted]').replace(/([?&]token=)[^\s]+/g, '$1[redacted]');
-const args = promptFile === '--web'
+const clean = text => (key ? text.split(key).join('[redacted]') : text).replace(/sk-[A-Za-z0-9_-]{12,}/g, '[redacted]').replace(/([?&]token=)[^\s]+/g, '$1[redacted]');
+const args = web
   ? [resolve(dshEntry), '--profile', 'web', '--patch', resolve(patch), ...extraArgs]
   : [resolve(dshEntry), '--profile', 'headless', '--patch', resolve(patch), readFileSync(resolve(promptFile), 'utf8')];
 const child = spawn(process.execPath, args, { cwd: root, windowsHide: true, stdio: ['ignore','pipe','pipe'],
-  env: { ...process.env, METEOR_E2E_API_KEY: key } });
+  env: { ...process.env, ...(key ? { METEOR_E2E_API_KEY: key } : {}) } });
 let log = '';
 for (const stream of [child.stdout, child.stderr]) createInterface({ input: stream }).on('line', line => {
   // Login URL is console-only for the invoking browser; never retain its token in reports.
