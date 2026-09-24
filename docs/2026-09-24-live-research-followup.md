@@ -1,5 +1,7 @@
 # WebUI 真实研究续测（2026-09-24）
 
+最新结果：`persistent-research` 已完成 Chief 自动准备与派发、subagent 编写/全尺寸测试/正式提交、程序自动集成、Chief 收取最终报告的真实设备闭环。交付的是固定四 case 的正确标量基线，未证明优化收益。下文保留失败沿革及最后一次成功的证据。
+
 ## 测试方式
 
 通过 DSH 0.1.7-alpha.2 WebUI 发起新 chief 会话，沿用用户在 UI 中选择的模型和集中 SSH 配置。每轮使用相同目标：自动初始化、探测和调试 SSH 设备，生成真实硬件报告，随后完成一个 qmq-v1 性能假设研究并汇报。研究运行期间不发送补充提示，不代写候选 kernel，不修改研究快照或原始回执。
@@ -98,3 +100,37 @@ Chief 收取结果后自行启动 `qmq-v1-ascend-real-followup`，指定前轮�
 校验器也增加最多八个 yScale 错误的行号、实际值和期望值；NaN/Inf 用字符串表示，保持严格 JSON。正确性判断、容差和失败样本不可作为计时的规则未改变。新 verifier 的内容哈希进入新 suite/oracle 身份，不重写旧证据。
 
 这些工具和停止条件修改通过 **142/142 全套测试，无跳过**，包含 installed alpha.2 接口测试；55 文件语法检查和 TypeScript 检查通过。真实交付是否完成，以接下来的最终提交、精确 revision full 数据与自动集成结果为准。
+
+## 最终真实交付验收
+
+在新的 `reports/e2e/persistent-research` 工作区，通过 WebUI 只发送：“使用 meteor 实现 qmq-v1 算子，在真实设备上完成验收并交付可运行的 kernel、全尺寸性能数据和下一步建议。”没有追加实验指导。保持用户选择的模型和集中配置。
+
+Chief 在第 7 步调用 `meteor_start`，创建 `qmq-v1-real-device-acceptance`。Subagent 会话 `6729f5e8-ffbb-42f6-9ab0-4fef1e485aa8` 自行编写两个 revision：r1 地址空间类型错误，r2 修复后构建成功，完成 probe 和 full，并提交一个 kernel。它的源码在真实 Vector 设备入口计算，Host 只发起 launch；没有由测试者代写候选或补测。
+
+### 全尺寸结果
+
+设备 Ascend910_9362 / dav-2201，device 0；suite `qmq-v1-seed42-1c93fd2f38251439`；实现 `qmq_fused_scalar@r2`。每个 case 有 3 次预热、5 个原始 ACL event 样本，以及匹配 `qmq_r2_` / `_Z13qmq_r2_kernelPhS_S_S_S_S_jjj` 的 `AI_VECTOR_CORE` 任务，执行证据均为 CONFIRMED。
+
+| M × N × K | 正确性 | 中位延迟（μs） |
+| --- | --- | ---: |
+| 16 × 32 × 64 | PASS | 520.260 |
+| 32 × 32 × 64 | PASS | 1027.160 |
+| 64 × 64 × 128 | PASS | 7871.980 |
+| 128 × 64 × 256 | PASS | 31610.901 |
+
+完整回执 ID：`1cb9624e716c0460727fafda`；build ID：`eb6bd2b761035acaf6749bdf`；源码 hash：`1d5843011ba2c4ed0c773a816802562b916b02d1d40159e57ea89a9ab1fa90d7`。
+
+### 提交与自动集成
+
+- 正式提交：`submission_bfe465fab8cf7a7d0137bdb2`，包含一个已测精确 revision、四个适用 case 和真实性能限制。
+- 自动集成：`integration_bfe465fab8cf7a7d0137bdb2`，状态 ASSEMBLED，四条 shape 路由均指向该基线。ASC 与 spec 均已生成。
+- 集成验证状态为 NOT_RUN，符合不运行 version 集成测试的设计；正确性与性能证据来自 subagent 的单 kernel full 测试。
+- Chief 自行读取 full、提交和集成证据后，将本轮目标标记完成并给出下一步建议。
+
+本地产物根目录为 `reports/e2e/persistent-research/reports/meteor/ssh/`：full 位于 `research/qmq-v1-real-device-acceptance/experiments/qmq-baseline-r2/full-tests/`；最终报告位于 `research-reports/qmq-v1-real-device-acceptance/`；集成文件位于 `integrations/integration_bfe465fab8cf7a7d0137bdb2/`。这些运行数据不随仓库发布。
+
+### 结论边界与下一步
+
+这是可运行基线交付成功：单 Vector block、标量循环、每个点积计算两遍，较大 case 很慢。Chief 给定命题以真实可运行性为本轮判定对象，明确将加速收益留待有对照后验证；提交的 SUPPORTED 不证明融合改善性能。后续性能研究应针对 Cube/Vector 分块或并行输出提出具体干预和可证伪预测，以该精确基线做有效对照，由新 subagent 独立完成候选的全尺寸测试。四个离散 case 之外的 shape 和专门数值边界未验证。
+
+提示词和诊断工具的更新在这次运行中共同生效，不能单独归因于其中一条改动。新一轮未发生正确性失败，因此诊断摘要的失败路径由本地回归验证，未在这轮实机成功路径中触发。后续对空 reason 规范化及 mock 参数说明的小修，相关接口/SSH 测试 **28/28 通过**；完整验收没有更改历史测量或提交。

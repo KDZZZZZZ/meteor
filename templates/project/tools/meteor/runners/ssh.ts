@@ -100,7 +100,7 @@ function summarizeVerifyJson(report: any): string[] {
   return parts;
 }
 function rowFailureReason(remote: any): string | undefined {
-  const base = remote.reason === undefined ? undefined : String(remote.reason);
+  const base = remote.reason == null ? undefined : String(remote.reason);
   if (remote.status === 'PASS') return base;
   const details: string[] = [];
   const verify = remote.verify;

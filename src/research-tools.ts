@@ -7,6 +7,7 @@ import { submissionSchema } from './submission-schema.ts';
 
 export const string = { type: 'string', minLength: 1 };
 export const strings = { type: 'array', items: string };
+const mockFixture = { description: 'Explicit mock-backend protocol tests only. Omit this field entirely for SSH research; do not send null, an empty object, or case metadata.' };
 
 /** Raw alpha.2 ToolDefinition: JSON parameters and canonical output. */
 export function defineTool(name: string, description: string, properties: Record<string, any>, required: string[], execute: (args: any, exec: ToolExecution) => Promise<any> | any): any {
@@ -128,7 +129,7 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
         return { path: target, bytes: Buffer.byteLength(args.content) };
       }),
     defineTool('meteor_kernel_build', 'Build one exact kernel revision for this research. Returns an immutable build receipt; mock output is simulated.',
-      { experiment_id: string, kernel_path: { ...string, description: 'Module directory or its kernel.json, relative to project root. File paths inside kernel.json are also relative to project root. Changing source or manifest requires a new revision.' }, fixture: {} }, ['experiment_id', 'kernel_path'], async (args, exec) => {
+      { experiment_id: string, kernel_path: { ...string, description: 'Module directory or its kernel.json, relative to project root. File paths inside kernel.json are also relative to project root. Changing source or manifest requires a new revision.' }, fixture: mockFixture }, ['experiment_id', 'kernel_path'], async (args, exec) => {
         const state = host.requireResearch(exec);
         return operation(state, 'build', exec, async (signal, idempotency_key) => {
           const receipt = await state.runtime.build.buildKernel(state.project, { ...args, research_id: state.id, idempotency_key, signal });
@@ -136,7 +137,7 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
         });
       }),
     defineTool('meteor_kernel_test', 'Run independent probe or full case tests for one of this research’s exact builds. Only full tests account for the entire fixed suite.',
-      { build_ref: string, mode: { type: 'string', enum: ['probe', 'full'] }, case_ids: strings, fixture: {} }, ['build_ref', 'mode'], async (args, exec) => {
+      { build_ref: string, mode: { type: 'string', enum: ['probe', 'full'] }, case_ids: strings, fixture: mockFixture }, ['build_ref', 'mode'], async (args, exec) => {
         const state = host.requireResearch(exec); ownBuild(state, args.build_ref);
         return operation(state, 'test', exec, async (signal, idempotency_key) => {
           const receipt = await state.runtime.test.testKernel(state.project, { ...args, idempotency_key, signal });
@@ -145,7 +146,7 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
         });
       }),
     defineTool('meteor_kernel_profile', 'Collect selected observations for one exact build and selected cases. Profiling does not replace full-case tests or establish causality by itself.',
-      { build_ref: string, case_ids: strings, metrics: { ...strings, description: 'Use supported_metrics from the hardware report. kernel_time_us is ACL event timing, not a hardware counter. Unsupported metrics return the allowed list.' }, fixture: {} }, ['build_ref', 'case_ids', 'metrics'], async (args, exec) => {
+      { build_ref: string, case_ids: strings, metrics: { ...strings, description: 'Use supported_metrics from the hardware report. kernel_time_us is ACL event timing, not a hardware counter. Unsupported metrics return the allowed list.' }, fixture: mockFixture }, ['build_ref', 'case_ids', 'metrics'], async (args, exec) => {
         const state = host.requireResearch(exec); ownBuild(state, args.build_ref);
         return operation(state, 'profile', exec, async (signal, idempotency_key) => {
           const receipt = await state.runtime.profile.profileKernel(state.project, { ...args, idempotency_key, signal });
