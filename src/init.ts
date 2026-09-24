@@ -55,6 +55,7 @@ export function initProject(root: string, options: { git?: boolean; backend?: 'm
       : project.config.environment.hardware_report_ref ? `Existing hardware report at ${project.config.environment.hardware_report_ref} is not ready for research. Chief should inspect it, resolve diagnostics and call meteor_hardware_probe again.`
         : 'Chief must call meteor_hardware_probe with no arguments to discover the existing central profile automatically. Do not invent a profile name or ask the user to repeat available configuration. Resolve diagnostics and read the hardware report before research.';
   return { root, state, execution_backend: backend, git_root: gitRoot, created, unchanged, conflicts,
+    template_root: resolve(templateRoot),
     hardware_report_ref: project.config.environment.hardware_report_ref,
     available_profiles: listSshProfiles(),
     next_action,

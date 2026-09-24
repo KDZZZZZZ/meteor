@@ -92,11 +92,15 @@ Distributed kernels and knowledge are inspiration. The child can read other mate
 
 ### Sustained Research
 
+Users can simply ask **“持续研究当前算子的性能”** or **“继续研究”**. The existing Chief skill handles native goal setup/reuse, project and device preparation, subagent dispatch, report collection and follow-up selection. `meteor_start.goal` can focus on the research question; the persona, skills, configuration and startup packet carry the operating rules. Native goal rounds follow the host's configured limit. `meteor_init` also returns `template_root` so Chief can locate upgrade sources without asking for installation paths; existing customizations and frozen research remain preserved.
+
 Chief may inspect a small set of relevant internal files and library evidence, and use available web tools to consult official vendor material before assigning a hypothesis. Once the hardware report is current and ready and the research objective is sufficient, it starts promptly instead of exhaustively reading source code or old logs.
 
 For an authorized sustained goal, chief first completes one research to check reliable calls, tool execution, reporting and automatic integration. After that succeeds, it chooses concurrency within the overall budget, each research's budget, and device capacity. It collects the research and integration receipts, evaluates progress toward the overall goal, and starts another distinct research when work and budget remain. Native jobs and available durable goal facilities track this work. Completing one research does not complete the overall goal, and starting another research does not reset its budget. Unknown remote requests must be queried or collected before retrying their work.
 
 Chief decides each start. The plugin creates one child per `meteor_start` and does not recursively create more research Agents. Credentials stay in centralized configuration and are excluded from prompts, task inputs and reports.
+
+While a research job runs, Chief can review completed evidence or prepare the next hypothesis. When progress requires that job, it uses native `job_output` with `wait:true` and a bounded timeout instead of shell sleeps or rapid polling. In alpha.2 an armed goal continues independently of background-job state, so ending repeated empty turns is not a passive wait. The existing skill covers this distinction and completion notifications.
 
 ## Execution Backends
 

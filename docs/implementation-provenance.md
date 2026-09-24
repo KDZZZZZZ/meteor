@@ -2,6 +2,14 @@
 
 This document separates human design requirements, Agent implementation choices, and external/reference material used while building meteor.
 
+## Short Requests And Native Waiting (2026-09-24)
+
+- **Human design:** put recurring operating instructions in the plugin prompts so users can ask for continuous research briefly; allow Chief to wait for subagents or do useful independent work.
+- **Agent choices:** keep one persona and two skills. Make short-request defaults, native goal reuse, project migration, structured `meteor_start` inputs and report-driven continuation explicit. Expose `template_root` from initialization so upgrade sources do not require a user-supplied machine path. Address observed empty optional arguments and the native editor's read prerequisite in existing skill guidance.
+- **Official basis:** installed DSH **0.1.7-alpha.2**, commit **00102833dfaee1da9f48a3a8eae9d34005a75218**. Its [goal tools](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/goal/tool-goal/README.md) distinguish direct user authority from autonomous goal rounds. Its [job tools](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/jobs/tool-jobs/README.md) offer terminal-state waiting and completion notification. [The goal driver](https://github.com/deepseek-ai/deepseek-harness/blob/00102833dfaee1da9f48a3a8eae9d34005a75218/packages/goal/goal-round-driver/src/index.ts) schedules by agent/goal readiness without consulting running jobs. The 60-second bounded wait in the skill is an Agent choice within the default tool limit; it is not a new sleep API or parallel execution by the Chief during that call.
+- **Scope:** read completed evidence and prepare future hypotheses while the child runs; use native bounded waiting when a result is required. Preserve running snapshots, current goal, provider settings and evidence. These prompt changes do not prove that a model will always follow the instructions or that the long-running research will succeed.
+- **Verification:** 21 targeted project/native-host tests passed; both skills passed validation; syntax, typecheck and build passed. The isolated official alpha.2 Web-profile check passed with zero model requests, including project skill discovery and frozen child skills. Project prompt files were synchronized with all 15 then-existing snapshot prompt files unchanged. The live server and goal were left running; the additive initialization return field is built for the next runtime load.
+
 ## Full-Size Coverage Update (2026-09-24)
 
 - **Human design:** inspect existing kernels and define a sufficiently broad full-size range.

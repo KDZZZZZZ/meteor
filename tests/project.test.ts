@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { initProject } from '../src/init.ts';
 import { loadProject } from '../src/project.ts';
 import { bindResearchSession, createResearch, getResearch, updateResearch, assertResearchActive } from '../templates/project/tools/meteor/research.ts';
@@ -14,6 +14,8 @@ test('init is idempotent, preserves human changes, and starts unconfigured by de
   const first = initProject(root, { git: false });
   assert.equal(first.state, 'setup_required');
   assert.equal(first.execution_backend, 'unconfigured');
+  assert(isAbsolute(first.template_root));
+  assert(existsSync(join(first.template_root, 'asc/case-suite.json')));
   assert(first.created.includes('meteor.config.json'));
   const second = initProject(root, { git: false });
   assert.equal(second.created.length, 0);
@@ -22,6 +24,9 @@ test('init is idempotent, preserves human changes, and starts unconfigured by de
   const third = initProject(root, { git: false });
   assert(third.conflicts.some(path => path.replaceAll('\\','/') === 'prompts/meteor.md'));
   assert.equal(readFileSync(join(root, 'prompts/meteor.md'), 'utf8'), 'human customization');
+  // Chief can resolve upgrade sources for a conflict without replacing customization.
+  assert.equal(third.template_root, first.template_root);
+  assert.notEqual(readFileSync(join(third.template_root, 'prompts/meteor.md'), 'utf8'), 'human customization');
   assert.equal(loadProject(root).config.execution.backend, 'unconfigured');
   assert(!existsSync(join(root, '.git')));
 });
