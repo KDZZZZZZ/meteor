@@ -12,17 +12,21 @@ export function createHost(ctx: DshContext): MeteorHost {
   const host = new MeteorHost(ctx);
   const disposers = [skills.dispose, ...registerResearchTools(ctx, host)];
   const definitions = [
-    defineTool('meteor_init', 'Initialize the current project with mock research tools, one persona, two skills, structured evidence storage and Ascend templates. Preserve existing files.', {}, [], async (_args, exec) => {
+    defineTool('meteor_init', 'Initialize the current project with one persona, two skills, structured evidence storage and Ascend templates. Device setup is required; chief must probe and debug real hardware before research. Preserve existing files.', {}, [], async (_args, exec) => {
       const result = await host.init(exec);
       skills.invalidate();
       return result;
     }),
+    defineTool('meteor_hardware_probe', 'Chief: discover and validate the real SSH device, compiler, launch, correctness and profiler support; save a hardware report and configure the project only when ready. Resolve diagnostics and re-probe if blocked. Uses only centralized SSH profiles.',
+      { profile_ref: { type: 'string', description: 'Central SSH profile reference. Omit or leave empty to discover the existing configured profile automatically. Never invent a reference.' } }, [], (args, exec) => host.hardware(args, exec)),
     defineTool('meteor_start', 'Start one continuous hypothesis research Agent as a native background job. Chief decides when and how many research tasks run in parallel.',
       {
-        goal: string, research_id: string, budget: { type: 'object', additionalProperties: true },
+        goal: string, research_id: string, budget: { type: 'object', additionalProperties: false,
+          description: 'Optional limits for this research; omitted fields use project defaults. One research can contain multiple experiments.',
+          properties: { max_experiments: { type: 'integer', minimum: 1 }, max_wall_time_seconds: { type: 'number', exclusiveMinimum: 0 } } },
         initial_context: {
           type: 'object', additionalProperties: false,
-          description: 'Choose freshness-based random materials or explicit kernel/knowledge references. Materials are inspiration, not access restrictions.',
+          description: 'Choose freshness-based random materials or explicit kernel/knowledge references. In random mode omit material refs or use empty arrays; in specified mode omit sampling or use an empty object. Materials are inspiration, not access restrictions.',
           properties: {
             mode: { type: 'string', enum: ['random', 'specified'] },
             sampling: { type: 'object', additionalProperties: false, properties: {

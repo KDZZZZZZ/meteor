@@ -61,7 +61,10 @@ export function normalizeInitialContext(input?: unknown): InitialContext {
   const mode = value.mode === undefined ? 'random' : value.mode;
   if (mode !== 'random' && mode !== 'specified') throw new Error('initial_context.mode must be random or specified');
   if (mode === 'random') {
-    if (value.kernel_refs !== undefined || value.knowledge_refs !== undefined) throw new Error('random initial_context cannot also specify material refs');
+    for (const key of ['kernel_refs', 'knowledge_refs']) {
+      if (value[key] !== undefined && (!Array.isArray(value[key]) || value[key].length > 0))
+        throw new Error(`random initial_context requires ${key} to be omitted or empty; use specified mode for actual material refs`);
+    }
     if (value.sampling === undefined) return { mode };
     const parameters = objectValue(value.sampling, 'initial_context.sampling');
     allowedKeys(parameters, ['count', 'seed', 'epsilon', 'lambda', 'tau_hours'], 'initial_context.sampling');
@@ -78,7 +81,8 @@ export function normalizeInitialContext(input?: unknown): InitialContext {
     }
     return { mode, sampling: normalizedParameters };
   }
-  if (value.sampling !== undefined) throw new Error('specified initial_context cannot include sampling parameters');
+  if (value.sampling !== undefined && Object.keys(objectValue(value.sampling, 'initial_context.sampling')).length > 0)
+    throw new Error('specified initial_context requires sampling to be omitted or empty; use random mode for sampling parameters');
   const normalized: InitialContext = { mode };
   for (const key of ['kernel_refs', 'knowledge_refs'] as const) {
     if (value[key] === undefined) continue;

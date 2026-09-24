@@ -5,6 +5,13 @@ import { assert, readJson } from './util.ts';
 
 export interface SshProfile { ssh_alias: string; remote_root: string; driver_path?: string; device_id?: string; connect_timeout_seconds?: number; env_script?: string; npu_arch?: string }
 export function profileStorePath() { return process.env.METEOR_PROFILES_PATH ?? join(homedir(), '.config', 'meteor', 'profiles.json'); }
+export function listSshProfiles(): string[] {
+  const path = profileStorePath();
+  if (!existsSync(path)) return [];
+  const data = readJson(path);
+  assert(data.schema_version === 1 && data.profiles && typeof data.profiles === 'object', 'Invalid profile store');
+  return Object.keys(data.profiles);
+}
 export function loadSshProfile(ref: string, options: { profilesPath?: string } = {}): SshProfile {
   const path = options.profilesPath ?? profileStorePath();
   assert(existsSync(path), 'SSH profiles missing; configure the central profile store first');

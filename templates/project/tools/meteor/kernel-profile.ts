@@ -4,6 +4,7 @@ import { experimentDir, loadBuildReceipt, selectRunner, validateBuildStillFresh 
 import type { MockFixture } from './runners/contract.ts';
 import { assertResearchActive } from './research.ts';
 import { assert, writeImmutable } from './util.ts';
+import { assertHardwareReady } from './hardware.ts';
 
 export interface ProfileKernelInput {
   build_ref: string;
@@ -23,6 +24,12 @@ export async function profileKernel(project: Project, input: ProfileKernelInput)
   assert(input.case_ids.length > 0, 'profile requires at least one case_id');
   assert(input.metrics.length > 0, 'profile requires at least one metric');
   for (const metric of input.metrics) assert(/^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(metric), `Invalid profile metric: ${metric}`);
+  if (project.config.execution.backend !== 'mock') {
+    const report = assertHardwareReady(project);
+    const allowed = report.result.supported_metrics ?? [];
+    const unsupported = input.metrics.filter(metric => !allowed.includes(metric));
+    assert(!unsupported.length, `Unsupported profile metrics: ${unsupported.join(', ')}. Allowed metrics on this device: ${allowed.join(', ')}. See hardware_report_ref for measurement meanings.`);
+  }
   const knownCases = new Set(project.suite.cases.map(item => item.case_id));
   for (const caseId of input.case_ids) assert(knownCases.has(caseId), `Unknown profile case_id: ${caseId}`);
   const build = loadBuildReceipt(project, input.build_ref);

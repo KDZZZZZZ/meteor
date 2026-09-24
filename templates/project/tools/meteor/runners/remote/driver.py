@@ -9,6 +9,7 @@ driver is intentionally stdlib-only; oracle helpers are bundled beside it.
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
 import json
 import os
@@ -24,6 +25,8 @@ from typing import Any
 
 DRIVER_DIR = Path(__file__).resolve().parent
 TIMING_PREFIX = "QMQ_TIMING_US "
+SUPPORTED_PROFILE_METRICS = ["kernel_time_us", "device_task_time_us"]
+DEVICE_TASK_TYPES = {"AI_CORE", "AICORE", "AI_VECTOR_CORE", "AI_VECTOR", "AIV", "MIX_AIC", "MIX_AICORE", "MIX_AIV"}
 
 
 def canonical(value: Any) -> str:
@@ -262,8 +265,46 @@ def run_command(command: list[str], cwd: Path, timeout: int = 900) -> dict[str, 
     }
 
 
+def run_optional_command(command: list[str], cwd: Path, timeout: int = 60) -> dict[str, Any]:
+    executable = command[0]
+    resolved = shutil.which(executable) if not Path(executable).is_absolute() else executable
+    if resolved is None:
+        return {
+            "command": command,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+            "duration_seconds": 0,
+            "unavailable_reason": f"{executable} not found",
+        }
+    return run_command(command, cwd, timeout=timeout)
+
+
+def require_int(value: Any, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        return int(value)
+    raise ValueError(f"{name} must be provided by the verified profile or hardware report")
+
+
+def require_npu_arch(request: dict[str, Any]) -> str:
+    value = request.get("npu_arch")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("npu_arch must be provided by the verified profile or hardware report")
+    if not all(ch.isalnum() or ch in "._-" for ch in value):
+        raise ValueError("invalid npu_arch")
+    return value
+
+
+def fake_enabled() -> bool:
+    return os.environ.get("METEOR_REMOTE_DRIVER_FAKE_BUILD") == "1"
+
+
 def install_harness(build_dir: Path) -> None:
-    for name in ("CMakeLists.txt", "main.asc", "gen_case.py", "verify_case.py"):
+    for name in ("CMakeLists.txt", "main.asc", "hardware_probe.cpp", "hardware_add.asc", "hardware_add_host.asc", "gen_case.py", "verify_case.py"):
         shutil.copy2(DRIVER_DIR / name, build_dir / name)
 
 
@@ -287,15 +328,15 @@ def make_fake_executable(path: Path) -> None:
 
 
 def action_build(request: dict[str, Any], remote_root: Path, request_dir: Path) -> dict[str, Any]:
-    simulated = os.environ.get("METEOR_REMOTE_DRIVER_FAKE_BUILD") == "1"
+    simulated = fake_enabled()
     guarded = guard_before_execution(request_dir, simulated)
     if guarded is not None:
         return guarded
     mark_running(request_dir, "build")
     build_id = require_id(request.get("build_id"), "build_id")
-    npu_arch = request.get("npu_arch") or "dav-2201"
-    if npu_arch != "dav-2201":
-        raise ValueError("only npu_arch=dav-2201 is supported by this driver")
+    npu_arch = request.get("npu_arch") if simulated else require_npu_arch(request)
+    if not isinstance(npu_arch, str) or not npu_arch:
+        npu_arch = "fake-npu"
     source = b64decode_checked(request.get("source_base64"), request.get("rendered_source_hash"))
     build_dir = inside(remote_root, "builds", build_id)
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -431,10 +472,11 @@ def build_metadata(remote_root: Path, build_id: str) -> dict[str, Any]:
 def validate_artifact(request: dict[str, Any], remote_root: Path, build_id: str, executable: Path) -> dict[str, Any]:
     metadata = build_metadata(remote_root, build_id)
     expected = request.get("artifact_hash")
+    npu_arch = metadata.get("npu_arch") or request.get("npu_arch")
     actual = sha256_text(canonical({
         "kernel": metadata.get("rendered_source_hash"),
         "executable": sha256_bytes(executable.read_bytes()),
-        "npu_arch": request.get("npu_arch") or "dav-2201",
+        "npu_arch": npu_arch,
     }))
     if metadata.get("artifact_hash") != actual:
         raise ValueError(f"stored artifact_hash no longer matches executable for {build_id}")
@@ -443,8 +485,119 @@ def validate_artifact(request: dict[str, Any], remote_root: Path, build_id: str,
     return metadata
 
 
+def task_type_matches(value: Any) -> bool:
+    text = str(value or "").strip().upper().replace(" ", "_")
+    return text in DEVICE_TASK_TYPES
+
+
+def read_csv_dicts(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def find_op_summary(profile_root: Path) -> Path | None:
+    candidates = sorted(profile_root.rglob("*op_summary*.csv")) + sorted(profile_root.rglob("*op_summary*.txt"))
+    return candidates[0] if candidates else None
+
+
+def find_op_summaries(profile_root: Path) -> list[Path]:
+    return sorted(profile_root.rglob("*op_summary*.csv")) + sorted(profile_root.rglob("*op_summary*.txt"))
+
+
+def parse_op_summary(path: Path, kernel_names: list[str], device_id: int) -> dict[str, Any]:
+    rows = read_csv_dicts(path) if path.suffix.lower() == ".csv" else []
+    matched: list[dict[str, Any]] = []
+    lowered_names = [name.lower() for name in kernel_names if name]
+    for row in rows:
+        values = {key.lower(): value for key, value in row.items()}
+        task_type = values.get("task type") or values.get("task_type") or values.get("tasktype") or values.get("type")
+        op_name = values.get("op name") or values.get("op_name") or values.get("opname") or values.get("kernel name") or values.get("kernel_name") or values.get("name") or ""
+        row_device = values.get("device_id") or values.get("device id") or values.get("device")
+        if row_device is None or not str(row_device).strip().isdecimal():
+            continue
+        if int(str(row_device).strip()) != device_id:
+            continue
+        if not task_type_matches(task_type):
+            continue
+        if lowered_names and not any(name in op_name.lower() for name in lowered_names):
+            continue
+        matched_name = next((name for name in kernel_names if name and name.lower() in op_name.lower()), op_name)
+        matched.append({
+            "device_id": int(str(row_device).strip()),
+            "kernel_name": matched_name,
+            "task_id": values.get("task id") or values.get("task_id"),
+            "stream_id": values.get("stream id") or values.get("stream_id"),
+            "task_type": task_type,
+            "op_name": op_name,
+            "op_type": values.get("op type") or values.get("op_type"),
+            "task_start_time_us": values.get("task start time(us)") or values.get("task_start_time(us)") or values.get("task_start_time_us"),
+            "task_duration_us": values.get("task duration(us)") or values.get("task_duration(us)") or values.get("task_duration_us"),
+            "block_dim": values.get("block dim") or values.get("block_dim"),
+        })
+    return {
+        "op_summary_ref": str(path),
+        "matched_task_count": len(matched),
+        "task_types": sorted({str(item.get("task_type")) for item in matched if item.get("task_type")}),
+        "matched_tasks": matched[:20],
+    }
+
+
+def msprof_witness_command(executable: Path, args: list[str], kernel_names: list[str], device_id: int,
+                           profile_root: Path, cwd: Path) -> dict[str, Any]:
+    if not kernel_names:
+        return {"status": "MISSING", "tool": "msprof", "reason": "candidate kernel_name is required for device execution witness", "allowed_to_pass": False}
+    msprof = shutil.which("msprof")
+    if msprof is None:
+        return {"status": "UNAVAILABLE", "tool": "msprof", "reason": "msprof not found", "allowed_to_pass": False}
+    if profile_root.exists():
+        shutil.rmtree(profile_root)
+    profile_root.mkdir(parents=True)
+    command = [
+        msprof,
+        "--task-time=l1",
+        "--ai-core=on",
+        "--aic-mode=task-based",
+        "--aic-metrics=PipeUtilization",
+        "--ascendcl=on",
+        "--runtime-api=on",
+        f"--output={profile_root}",
+        str(executable), *[str(arg) for arg in args],
+    ]
+    prof = run_command(command, cwd, timeout=900)
+    if prof["returncode"] != 0:
+        return {"status": "MISSING", "tool": "msprof", "reason": "msprof returned nonzero", "log": prof, "allowed_to_pass": False}
+    summaries = find_op_summaries(profile_root)
+    if not summaries:
+        return {"status": "MISSING", "tool": "msprof", "reason": "op_summary not found", "log": prof, "allowed_to_pass": False}
+    parsed_items = [parse_op_summary(summary, kernel_names, device_id) for summary in summaries]
+    matched_tasks = [task for item in parsed_items for task in item["matched_tasks"]]
+    matched_task_count = sum(item["matched_task_count"] for item in parsed_items)
+    combined = {
+        "source": "profile_dir",
+        "profile_dir": str(profile_root),
+        "op_summary_refs": [str(path) for path in summaries],
+        "matched_task_count": matched_task_count,
+        "task_types": sorted({task_type for item in parsed_items for task_type in item["task_types"]}),
+        "matched_tasks": matched_tasks[:20],
+        "matched_ops": matched_tasks[:20],
+    }
+    if matched_task_count <= 0:
+        return {"status": "MISSING", "tool": "msprof", "reason": "no AI_CORE/AI_VECTOR/MIX_AIC task matched candidate kernel and logical device", **combined, "log": prof, "allowed_to_pass": False}
+    return {"status": "CONFIRMED", "tool": "msprof", "kernel_names": kernel_names, "device_id": device_id, **combined, "log": prof, "allowed_to_pass": True}
+
+
+def msprof_witness(request: dict[str, Any], executable: Path, case: dict[str, Any], case_dir: Path,
+                  device_id: int, warmup: int, repetitions: int) -> dict[str, Any]:
+    kernel_names = [str(value) for value in request.get("kernel_names") or [] if isinstance(value, str)]
+    if isinstance(request.get("kernel_name"), str):
+        kernel_names.append(request["kernel_name"])
+    shape = case.get("shape") or {}
+    args = [str(shape["m"]), str(shape["n"]), str(shape["k"]), str(device_id), str(warmup), str(repetitions)]
+    return msprof_witness_command(executable, args, kernel_names, device_id, case_dir / "msprof", case_dir)
+
+
 def execute_case(request: dict[str, Any], remote_root: Path, executable: Path, case: dict[str, Any],
-                 device_id: int, warmup: int, repetitions: int, work_root: Path) -> dict[str, Any]:
+                 device_id: int, warmup: int, repetitions: int, work_root: Path, simulated: bool) -> dict[str, Any]:
     case_id = require_id(case.get("case_id"), "case_id")
     shape = case.get("shape") or {}
     case_dir = work_root / case_id
@@ -472,12 +625,28 @@ def execute_case(request: dict[str, Any], remote_root: Path, executable: Path, c
     else:
         status = "PASS"
         reason = None
+    if simulated:
+        device_execution = {
+            "status": "SIMULATED",
+            "tool": "fake-harness",
+            "reason": "METEOR_REMOTE_DRIVER_FAKE_BUILD is enabled; this is not hardware evidence",
+            "allowed_to_pass": True,
+            "matched_tasks": [],
+        }
+    elif status == "PASS":
+        device_execution = msprof_witness(request, executable, case, case_dir, device_id, warmup, repetitions)
+        if device_execution.get("status") != "CONFIRMED":
+            status = "RUN_FAILED"
+            reason = "device execution witness missing"
+    else:
+        device_execution = {"status": "NOT_RUN", "tool": "msprof", "reason": "not collected because case did not pass functional execution", "allowed_to_pass": False}
     return {
         "case_id": case_id,
         "status": status,
         "samples_us": timings,
         "median_us": median(timings),
         "reason": reason,
+        "device_execution": device_execution,
         "run": run,
         "verify": verify,
         "input_hash": input_hash,
@@ -486,13 +655,13 @@ def execute_case(request: dict[str, Any], remote_root: Path, executable: Path, c
 
 
 def action_test(request: dict[str, Any], remote_root: Path, request_dir: Path) -> dict[str, Any]:
-    simulated = os.environ.get("METEOR_REMOTE_DRIVER_FAKE_BUILD") == "1"
+    simulated = fake_enabled()
     guarded = guard_before_execution(request_dir, simulated)
     if guarded is not None:
         return guarded
     mark_running(request_dir, "test")
     build_id = require_id(request.get("build_id"), "build_id")
-    device_id = int(request.get("device_id", 0))
+    device_id = require_int(request.get("device_id"), "device_id")
     repetitions = int(request.get("repetitions", 5))
     warmup = int(request.get("warmup", 3))
     executable = load_build_executable(remote_root, build_id)
@@ -514,7 +683,7 @@ def action_test(request: dict[str, Any], remote_root: Path, request_dir: Path) -
             if case_id not in supported:
                 rows.append({"case_id": case_id, "status": "UNSUPPORTED", "samples_us": [], "reason": "case not in supported_case_ids"})
                 continue
-            rows.append(execute_case(request, remote_root, executable, case, device_id, warmup, repetitions, work_root))
+            rows.append(execute_case(request, remote_root, executable, case, device_id, warmup, repetitions, work_root, simulated))
     result = {
         "status": "CANCELLED" if cancelled else "COMPLETED",
         "backend": "ssh",
@@ -532,13 +701,13 @@ def action_test(request: dict[str, Any], remote_root: Path, request_dir: Path) -
 
 
 def action_profile(request: dict[str, Any], remote_root: Path, request_dir: Path) -> dict[str, Any]:
-    simulated = os.environ.get("METEOR_REMOTE_DRIVER_FAKE_BUILD") == "1"
+    simulated = fake_enabled()
     guarded = guard_before_execution(request_dir, simulated)
     if guarded is not None:
         return guarded
     mark_running(request_dir, "profile")
-    metrics = request.get("metrics") or []
-    unsupported = [metric for metric in metrics if metric != "kernel_time_us"]
+    metrics = request.get("metrics") or ["kernel_time_us"]
+    unsupported = [metric for metric in metrics if metric not in SUPPORTED_PROFILE_METRICS]
     if unsupported:
         result = {
             "status": "FAILED",
@@ -546,11 +715,12 @@ def action_profile(request: dict[str, Any], remote_root: Path, request_dir: Path
             "simulated": simulated,
             "reason": "unsupported profile metrics requested",
             "unsupported_metrics": unsupported,
+            "allowed_metrics": SUPPORTED_PROFILE_METRICS,
             "instrumented": False,
         }
         return finish(request_dir, result)
     build_id = require_id(request.get("build_id"), "build_id")
-    device_id = int(request.get("device_id", 0))
+    device_id = require_int(request.get("device_id"), "device_id")
     repetitions = int(request.get("repetitions", 5))
     warmup = int(request.get("warmup", 3))
     executable = load_build_executable(remote_root, build_id)
@@ -566,10 +736,20 @@ def action_profile(request: dict[str, Any], remote_root: Path, request_dir: Path
             if case_id not in supported:
                 raw.append({"case_id": case_id, "status": "UNSUPPORTED", "samples_us": [], "reason": "case not in supported_case_ids"})
                 continue
-            row = execute_case(request, remote_root, executable, case, device_id, warmup, repetitions, work_root)
+            row = execute_case(request, remote_root, executable, case, device_id, warmup, repetitions, work_root, simulated)
             raw.append(row)
-            if row["status"] == "PASS" and row["median_us"] is not None:
-                observations.append({"case_id": case_id, "metric": "kernel_time_us", "value": row["median_us"], "unit": "us"})
+            if row["status"] == "PASS" and "kernel_time_us" in metrics and row["median_us"] is not None:
+                observations.append({"case_id": case_id, "metric": "kernel_time_us", "value": row["median_us"], "unit": "us", "measurement_kind": "acl_event_interval"})
+            if row["status"] == "PASS" and "device_task_time_us" in metrics:
+                durations = []
+                for task in row.get("device_execution", {}).get("matched_tasks", []):
+                    raw_duration = task.get("task_duration_us")
+                    try:
+                        durations.append(float(raw_duration))
+                    except (TypeError, ValueError):
+                        pass
+                if durations:
+                    observations.append({"case_id": case_id, "metric": "device_task_time_us", "value": median(durations), "unit": "us", "measurement_kind": "msprof_task_duration"})
     result = {
         "status": "COMPLETED",
         "backend": "ssh",
@@ -577,9 +757,266 @@ def action_profile(request: dict[str, Any], remote_root: Path, request_dir: Path
         "build_id": build_id,
         "artifact_hash": build_info.get("artifact_hash"),
         "rendered_source_hash": build_info.get("rendered_source_hash"),
-        "instrumented": True,
+        "instrumented": "device_task_time_us" in metrics,
+        "measurement_kind": "acl_event_interval" if set(metrics) == {"kernel_time_us"} else "mixed",
+        "supported_metrics": SUPPORTED_PROFILE_METRICS,
         "observations": observations,
         "raw_profiles": raw,
+    }
+    return finish(request_dir, result)
+
+
+def parse_npu_smi_devices(stdout: str) -> list[dict[str, Any]]:
+    devices: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        if "|" not in line:
+            continue
+        parts = [part.strip() for part in line.strip("|").split("|")]
+        numbers = [part for part in parts if part.isdecimal()]
+        if len(numbers) >= 1 and any("910" in part or "Ascend" in part for part in parts):
+            devices.append({
+                "device_id": int(numbers[0]),
+                "name": next((part for part in parts if "Ascend" in part or "910" in part), None),
+                "soc_version": None,
+                "health": None,
+                "memory": {"total_bytes": None, "free_bytes": None, "reason": "not parsed from npu-smi table"},
+                "raw": line,
+            })
+    return devices
+
+
+def parse_npu_smi_mapping(stdout: str) -> list[dict[str, Any]]:
+    devices: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].isdecimal() and parts[1].isdecimal() and parts[2].isdecimal():
+            devices.append({
+                "device_id": int(parts[2]),
+                "card_id": int(parts[0]),
+                "chip_id": int(parts[1]),
+                "physical_id": int(parts[3]) if parts[3].isdecimal() else None,
+                "name": parts[4],
+                "soc_version": parts[4],
+                "npu_arch": None,
+                "npu_arch_reason": "Platform GetCurNpuArch unavailable in this probe build",
+                "memory": {"total_bytes": None, "free_bytes": None, "reason": "not parsed from npu-smi mapping"},
+                "health": {"status": None, "reason": "health query requires per-card npu-smi raw log"},
+                "raw": line,
+            })
+    return devices
+
+
+
+def merge_inventory_fields(devices: list[dict[str, Any]], inventory_devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    inventory_by_id = {device.get("device_id"): device for device in inventory_devices}
+    merged = []
+    for device in devices:
+        item = dict(device)
+        inventory = inventory_by_id.get(item.get("device_id"))
+        if inventory:
+            for key in ("card_id", "chip_id", "physical_id", "raw"):
+                if key not in item or item.get(key) is None:
+                    item[key] = inventory.get(key)
+            if inventory.get("name") and item.get("name") != inventory.get("name"):
+                item["inventory_name"] = inventory.get("name")
+        merged.append(item)
+    return merged
+
+
+def build_and_witness_hardware_add(remote_root: Path, request: dict[str, Any], probe_root: Path,
+                                   build_dir: Path, selected: dict[str, Any] | None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    logs: list[dict[str, Any]] = []
+    if selected is None:
+        return {
+            "compile": False,
+            "launch": False,
+            "correctness": False,
+            "reason": "no selected device from runtime discovery",
+            "device_execution": {"status": "NOT_RUN", "source": "msprof", "matched_tasks": [], "reason": "not collected: no selected device"},
+        }, logs
+    npu_arch = selected.get("npu_arch")
+    if not isinstance(npu_arch, str) or not npu_arch:
+        return {
+            "compile": False,
+            "launch": False,
+            "correctness": False,
+            "reason": "npu_arch unavailable; refusing to compile device kernel with guessed architecture",
+            "device_execution": {"status": "NOT_RUN", "source": "msprof", "matched_tasks": [], "reason": "not collected: npu_arch unavailable"},
+        }, logs
+    device_id = int(selected.get("device_id"))
+    logs.append(run_optional_command(["cmake", "-S", str(probe_root), "-B", str(build_dir), f"-DNPU_ARCH={npu_arch}"], probe_root, timeout=300))
+    if logs[-1].get("returncode") == 0:
+        logs.append(run_optional_command(["cmake", "--build", str(build_dir), "--target", "meteor_hardware_add", "-j2"], probe_root, timeout=300))
+    executable = build_dir / "meteor_hardware_add"
+    compile_ok = bool(len(logs) >= 2 and logs[0].get("returncode") == 0 and logs[1].get("returncode") == 0 and executable.exists())
+    launch = {"returncode": None, "stdout": "", "stderr": "", "command": [str(executable)], "unavailable_reason": "compile failed"}
+    witness: dict[str, Any] = {"status": "NOT_RUN", "source": "msprof", "matched_tasks": [], "reason": "not collected because compilation failed"}
+    if compile_ok:
+        request_id = require_id(request.get("request_id"), "request_id")
+        run_root = inside(remote_root, "hardware-probe-runs", request_id)
+        run_root.mkdir(parents=True, exist_ok=True)
+        args = ["1", "1", "1", str(device_id), "2", "3"]
+        with DeviceLock(remote_root, device_id):
+            launch = run_command([str(executable), *args], run_root, timeout=300)
+            logs.append(launch)
+            if launch.get("returncode") == 0 and "METEOR_HARDWARE_ADD_PASS" in launch.get("stdout", ""):
+                witness = msprof_witness_command(
+                    executable,
+                    args,
+                    ["meteor_hardware_add_kernel"],
+                    device_id,
+                    run_root / "msprof",
+                    run_root,
+                )
+            else:
+                witness = {"status": "NOT_RUN", "source": "msprof", "matched_tasks": [], "reason": "not collected because hardware add launch/correctness failed", "log": launch}
+    launch_ok = bool(launch.get("returncode") == 0)
+    correctness_ok = bool(launch_ok and "METEOR_HARDWARE_ADD_PASS" in launch.get("stdout", ""))
+    validation = {
+        "compile": compile_ok,
+        "launch": launch_ok,
+        "correctness": correctness_ok,
+        "reason": ("minimal device-kernel compilation failed" if not compile_ok else
+                   "minimal device-kernel launch/correctness failed" if not correctness_ok else
+                   "minimal device-kernel msprof witness did not confirm" if witness.get("status") != "CONFIRMED" else None),
+        "device_execution": witness,
+    }
+    return validation, logs
+
+def run_hardware_probe(remote_root: Path, request: dict[str, Any]) -> dict[str, Any]:
+    probe_root = inside(remote_root, "hardware-probes", require_id(request.get("request_id"), "request_id"))
+    probe_root.mkdir(parents=True, exist_ok=True)
+    install_harness(probe_root)
+    build_dir = probe_root / "cmake-build"
+    build_dir.mkdir(exist_ok=True)
+    logs = [
+        run_optional_command(["cmake", "-S", str(probe_root), "-B", str(build_dir)], probe_root, timeout=300),
+    ]
+    if logs[-1]["returncode"] == 0:
+        logs.append(run_optional_command(["cmake", "--build", str(build_dir), "--target", "meteor_hardware_probe", "-j2"], probe_root, timeout=300))
+    executable = build_dir / "meteor_hardware_probe"
+    launched = False
+    parsed: dict[str, Any] | None = None
+    if logs and logs[-1]["returncode"] == 0 and executable.exists():
+        run = run_command([str(executable)], probe_root, timeout=300)
+        logs.append(run)
+        launched = run["returncode"] == 0
+        try:
+            parsed = json.loads(run["stdout"])
+        except Exception:
+            parsed = None
+    devices = parsed.get("devices") if isinstance(parsed, dict) and isinstance(parsed.get("devices"), list) else []
+    requested_device = request.get("device_id")
+    selected = None
+    if isinstance(requested_device, int) or (isinstance(requested_device, str) and requested_device.isdecimal()):
+        device_id = int(requested_device)
+        selected = next((device for device in devices if device.get("device_id") == device_id), None)
+    elif devices:
+        selected = next((device for device in devices if device.get("soc_version") and device.get("npu_arch")), None)
+    runtime_discovery = {
+        "compile": bool(len(logs) >= 2 and logs[0].get("returncode") == 0 and logs[1].get("returncode") == 0),
+        "launch": launched,
+        "correctness": bool(parsed and parsed.get("status") == "READY" and devices),
+    }
+    validation, add_logs = build_and_witness_hardware_add(remote_root, request, probe_root, build_dir, selected)
+    logs.extend(add_logs)
+    validation["runtime_discovery"] = runtime_discovery
+    return {"logs": logs, "parsed": parsed, "devices": devices, "selected_device": selected, "validation": validation}
+
+
+def action_hardware(request: dict[str, Any], remote_root: Path, request_dir: Path) -> dict[str, Any]:
+    simulated = fake_enabled()
+    guarded = guard_before_execution(request_dir, simulated)
+    if guarded is not None:
+        return guarded
+    mark_running(request_dir, "hardware")
+    if simulated:
+        return finish(request_dir, {
+            "status": "COMPLETED",
+            "readiness": "BLOCKED",
+            "backend": "ssh",
+            "simulated": True,
+            "supported_metrics": SUPPORTED_PROFILE_METRICS,
+            "selected_device": None,
+            "validation": {
+                "compile": False,
+                "launch": False,
+                "correctness": False,
+                "device_execution": {"status": "SIMULATED", "source": "fake-harness", "matched_tasks": [], "reason": "fake harness cannot validate hardware"},
+            },
+            "devices": [],
+            "device_count": 0,
+            "cann": {"compiler": None, "runtime": None, "reason": "fake harness"},
+            "tools": {"msprof": None, "reason": "fake harness"},
+            "logs": [{"command": ["fake-hardware"], "returncode": 0, "stdout": "", "stderr": ""}],
+        })
+    probe = run_hardware_probe(remote_root, request)
+    logs = [
+        run_optional_command(["npu-smi", "info"], remote_root),
+        run_optional_command(["npu-smi", "info", "-m"], remote_root),
+    ]
+    device_log = next((item for item in logs if item["command"][:2] == ["npu-smi", "info"] and item.get("returncode") == 0), None)
+    mapping_log = next((item for item in logs if item["command"][:3] == ["npu-smi", "info", "-m"] and item.get("returncode") == 0), None)
+    inventory_devices = parse_npu_smi_mapping(mapping_log.get("stdout", "")) if mapping_log else []
+    if not inventory_devices and device_log:
+        inventory_devices = parse_npu_smi_devices(device_log.get("stdout", ""))
+    devices = merge_inventory_fields(probe["devices"], inventory_devices) if probe["devices"] else inventory_devices
+    selected = probe["selected_device"]
+    if selected is not None:
+        selected = merge_inventory_fields([selected], inventory_devices)[0]
+    if selected is None and inventory_devices:
+        requested_device = request.get("device_id")
+        if isinstance(requested_device, int) or (isinstance(requested_device, str) and requested_device.isdecimal()):
+            selected = next((device for device in inventory_devices if device.get("device_id") == int(requested_device)), None)
+    if selected and selected.get("card_id") is not None:
+        card_id = str(selected.get("card_id"))
+        chip_id = str(selected.get("chip_id")) if selected.get("chip_id") is not None else None
+        logs.append(run_optional_command(["npu-smi", "info", "-t", "memory", "-i", card_id] + (["-c", chip_id] if chip_id is not None else []), remote_root))
+        logs.append(run_optional_command(["npu-smi", "info", "-t", "health", "-i", card_id] + (["-c", chip_id] if chip_id is not None else []), remote_root))
+    else:
+        logs.append(run_optional_command(["npu-smi", "info", "-t", "memory"], remote_root))
+        logs.append(run_optional_command(["npu-smi", "info", "-t", "health"], remote_root))
+    if selected is not None:
+        health_log = next((item for item in logs if item.get("command", [])[1:4] == ["info", "-t", "health"] and item.get("returncode") == 0), None)
+        if health_log:
+            health_fields = dict(line.strip().split(":", 1) for line in health_log.get("stdout", "").splitlines() if ":" in line)
+            health_fields = {key.strip(): value.strip() for key, value in health_fields.items()}
+            selected["health"] = {"status": health_fields.get("Health Status"), "error_code": health_fields.get("Error Code"),
+                                  "error_information": health_fields.get("Error Information"),
+                                  "reason": None if health_fields.get("Health Status") else "Health Status field unavailable"}
+    logs.extend([
+        run_optional_command(["msprof", "--help"], remote_root),
+        run_optional_command(["bisheng", "--version"], remote_root),
+        run_optional_command(["ccec", "--version"], remote_root),
+    ])
+    selected_ready = bool(
+        selected
+        and selected.get("npu_arch")
+        and all(probe["validation"].get(key) is True for key in ("compile", "launch", "correctness"))
+        and probe["validation"]["device_execution"].get("status") == "CONFIRMED"
+        and probe["validation"]["device_execution"].get("matched_tasks")
+    )
+    result = {
+        "status": "COMPLETED" if (device_log or probe["validation"]["launch"]) else "FAILED",
+        "readiness": "READY" if selected_ready else "BLOCKED",
+        "backend": "ssh",
+        "simulated": False,
+        "supported_metrics": SUPPORTED_PROFILE_METRICS,
+        "selected_device": selected,
+        "validation": probe["validation"],
+        "device_count": len(devices) if devices else None,
+        "devices": devices,
+        "cann": {
+            "compiler": next((item.get("stdout") or item.get("stderr") for item in logs if item["command"][0] in {"bisheng", "ccec"} and item.get("returncode") == 0), None),
+            "runtime": None,
+            "reason": None if device_log else "npu-smi info unavailable",
+        },
+        "tools": {
+            "msprof": next((item.get("stdout") or item.get("stderr") for item in logs if item["command"][0] == "msprof" and (item.get("returncode") == 0 or "Usage:" in (item.get("stdout") or ""))), None),
+            "reason": None if any(item["command"][0] == "msprof" and (item.get("returncode") == 0 or "Usage:" in (item.get("stdout") or "")) for item in logs) else "msprof unavailable",
+        },
+        "probe": probe.get("parsed"),
+        "logs": probe["logs"] + logs,
     }
     return finish(request_dir, result)
 
@@ -625,8 +1062,8 @@ def action_cancel(request: dict[str, Any], remote_root: Path) -> dict[str, Any]:
 
 def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     action = request.get("action")
-    if action not in {"build", "test", "profile", "poll", "collect", "cancel"}:
-        raise ValueError("action must be build, test, profile, poll, collect, or cancel")
+    if action not in {"build", "test", "profile", "hardware", "poll", "collect", "cancel"}:
+        raise ValueError("action must be build, test, profile, hardware, poll, collect, or cancel")
     remote_root = require_remote_root(request.get("remote_root"))
     if action in {"poll", "collect", "cancel"}:
         if action == "poll":
@@ -649,7 +1086,9 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
             return action_build(request, remote_root, request_dir)
         if action == "test":
             return action_test(request, remote_root, request_dir)
-        return action_profile(request, remote_root, request_dir)
+        if action == "profile":
+            return action_profile(request, remote_root, request_dir)
+        return action_hardware(request, remote_root, request_dir)
 
 
 def main() -> int:

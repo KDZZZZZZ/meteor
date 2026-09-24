@@ -1,11 +1,15 @@
-export type Backend = 'mock' | 'ssh';
+export type Backend = 'unconfigured' | 'mock' | 'ssh';
 export type Verdict = 'SUPPORTED' | 'REFUTED' | 'INCONCLUSIVE';
 export type RunStatus = 'CREATED' | 'ACTIVE' | 'PAUSED' | 'OUTPUT_FROZEN' | 'COMMIT_PENDING' | 'REPORT_PENDING' | 'CLOSED' | 'CANCELLED' | 'FAILED' | 'INTERRUPTED' | 'UNKNOWN_REMOTE';
 export type CaseStatus = 'PASS' | 'INCORRECT' | 'UNSUPPORTED' | 'RESOURCE_REJECTED' | 'RUN_FAILED' | 'TIMEOUT' | 'NOT_RUN';
 export interface Shape { m: number; n: number; k: number }
 export interface Case { case_id: string; shape: Shape; dtype: string; layout: string; input_hash: string; oracle_hash: string; data_ref?: string }
 export interface CaseSuite { revision: string; operator_abi: string; cases: Case[] }
-export interface Environment { environment_ref: string; hardware: string; toolchain: string; measurement_protocol_ref: string; simulated: boolean }
+export interface Environment {
+  environment_ref: string; hardware: string; toolchain: string; measurement_protocol_ref: string; simulated: boolean;
+  hardware_report_ref?: string; hardware_report_hash?: string; profile_hash?: string;
+  device_id?: number; npu_arch?: string;
+}
 export interface MeteorConfig {
   schema_version: 1;
   execution: { backend: Backend; profile_ref: string };
@@ -56,6 +60,12 @@ export interface Measurement {
   case_id: string; status: CaseStatus; samples_us: number[]; median_us?: number;
   reason?: string; actual_kernel_ref: KernelRef; source_hash: string;
   input_hash: string; oracle_hash: string;
+  device_execution?: DeviceExecution;
+}
+export interface DeviceExecution {
+  status: 'CONFIRMED' | 'MISSING' | 'UNAVAILABLE' | 'NOT_RUN' | 'SIMULATED';
+  tool?: string; reason?: string; matched_tasks?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
 }
 export interface TestReceipt {
   run_id: string; research_id: string; experiment_id: string; kernel_ref: KernelRef;
@@ -102,7 +112,9 @@ export interface PreparedSubmission { prepared_submission_id: string; submission
 export interface ProfileReceipt {
   profile_id: string; research_id: string; experiment_id: string; kernel_ref: KernelRef;
   source_hash: string; environment_ref: string; execution_backend: Backend; simulated: boolean;
-  fixture_id?: string; observations: Array<{ case_id: string; metric: string; value: number; unit: string }>;
-  instrumented: true;
+  fixture_id?: string; observations: Array<{ case_id: string; metric: string; value: number; unit: string; measurement_kind?: string }>;
+  instrumented: boolean;
+  measurement_kind?: string; supported_metrics?: string[];
+  raw_profiles?: Array<{ case_id: string; status: string; device_execution?: DeviceExecution; input_hash?: string; oracle_hash?: string }>;
   remote_request_id?: string; raw_receipt_ref?: string; remote_release_confirmed?: boolean;
 }

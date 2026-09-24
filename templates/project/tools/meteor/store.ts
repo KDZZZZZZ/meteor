@@ -140,14 +140,14 @@ export function updateResearchManifest(project: Project, researchId: string, pat
 export function initKnowledgeStore(project: Project): void {
   const script = knowledgeStoreScript(project);
   if (!existsSync(script)) throw new Error(`knowledge store script not found: ${script}`);
-  const result = spawnSync('python', [script, 'init', storePaths(project).knowledgeRoot], { encoding: 'utf8' });
+  const result = spawnSync('python', [script, 'init', storePaths(project).knowledgeRoot], knowledgeProcessOptions());
   if (result.status !== 0) throw new Error(`knowledge store init failed: ${result.stderr || result.stdout}`);
 }
 
 export function importSubmissionToKnowledge(project: Project, commitPath: string): void {
   const script = knowledgeStoreScript(project);
   if (!existsSync(script)) throw new Error(`knowledge store script not found: ${script}`);
-  const result = spawnSync('python', [script, 'import-submission', storePaths(project).knowledgeRoot, commitPath], { encoding: 'utf8' });
+  const result = spawnSync('python', [script, 'import-submission', storePaths(project).knowledgeRoot, commitPath], knowledgeProcessOptions());
   if (result.status !== 0) throw new Error(`knowledge store import failed: ${result.stderr || result.stdout}`);
 }
 
@@ -203,11 +203,19 @@ function runKnowledgeCommand(project: Project, command: string, payload: unknown
   const script = knowledgeStoreScript(project);
   if (!existsSync(script)) throw new Error(`knowledge store script not found: ${script}`);
   const result = spawnSync('python', [script, command, storePaths(project).knowledgeRoot], {
-    encoding: 'utf8',
+    ...knowledgeProcessOptions(),
     input: JSON.stringify(payload),
   });
   if (result.status !== 0) throw new Error(`knowledge store ${command} failed: ${result.stderr || result.stdout}`);
   return result.stdout.trim() ? JSON.parse(result.stdout) : { ok: true };
+}
+
+function knowledgeProcessOptions() {
+  return {
+    encoding: 'utf8' as const,
+    windowsHide: true,
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+  };
 }
 
 function currentLeaseToken(project: Project, eventId: string): string | undefined {

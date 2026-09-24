@@ -16,7 +16,7 @@ import { writeJson } from '../templates/project/tools/meteor/util.ts';
 async function setup(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), 'meteor-submission-owner-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  initProject(root, { git: false });
+  initProject(root, { git: false, backend: 'mock' });
   const project = loadProject(root);
   const kernelPath = 'kernels/research_A/shared/r1';
   const module: KernelModule = {

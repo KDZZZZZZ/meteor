@@ -11,27 +11,18 @@ import { buildReceiptPath, computeSourceHash, experimentDir, receiptRef } from '
 import { bindResearchSession, createResearch } from '../templates/project/tools/meteor/research.ts';
 import { commitSubmission, prepareSubmission, SubmissionValidationError } from '../templates/project/tools/meteor/submit.ts';
 import { hashObject, writeJson } from '../templates/project/tools/meteor/util.ts';
+import { installHardwareProfile, materializeUnitCaseSuite, writeReadyHardwareFixture } from './helpers/hardware.ts';
 
 // These are protocol fixtures, not hardware measurements. No runner or SSH connection is used.
 function setup(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), 'meteor-hypothesis-evidence-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  initProject(root, { git: false });
+  initProject(root, { git: false, backend: 'mock' });
   const initial = loadProject(root);
-  writeJson(join(root, 'meteor.config.json'), {
-    ...initial.config,
-    execution: { backend: 'ssh', profile_ref: 'fixture-only-no-connection' },
-    environment: {
-      environment_ref: 'fixture-ascend-env', hardware: 'fixture-ascend', toolchain: 'fixture-cann',
-      measurement_protocol_ref: 'fixture-median-5', simulated: false,
-    },
-  });
-  writeJson(join(root, initial.config.case_suite), {
-    ...initial.suite, revision: 'fixture-suite-v1',
-    cases: initial.suite.cases.slice(0, 2).map(item => ({
-      ...item, input_hash: hashObject(['input', item.case_id]), oracle_hash: hashObject(['oracle', item.case_id]),
-    })),
-  });
+  installHardwareProfile(t, root);
+  writeReadyHardwareFixture(root);
+  writeJson(join(root, initial.config.case_suite), { ...initial.suite, revision: 'fixture-suite-v1', cases: initial.suite.cases.slice(0, 2) });
+  materializeUnitCaseSuite(root, 'fixture-suite-v1');
   const project = loadProject(root);
   const researchId = 'research_evidence';
   const experimentId = 'experiment_1';
@@ -65,6 +56,8 @@ function setup(t: TestContext) {
     const rows: TestReceipt['rows'] = project.suite.cases.map((item, index) => ({
       case_id: item.case_id, status: 'PASS', samples_us: Array(5).fill(times[index]), median_us: times[index],
       actual_kernel_ref: build.kernel_ref, source_hash: sourceHash, input_hash: item.input_hash, oracle_hash: item.oracle_hash,
+      device_execution: { status: 'CONFIRMED', tool: 'unit-fixture',
+        matched_tasks: [{ case_id: item.case_id, device_id: 0, task_type: 'AI_CORE', op_name: `${kernelId}_device` }] },
     }));
     const receipt: TestReceipt = {
       run_id: 'run_' + kernelId, research_id: id, experiment_id: experimentId, kernel_ref: build.kernel_ref,
@@ -83,8 +76,13 @@ function setup(t: TestContext) {
     const receipt: ProfileReceipt = {
       profile_id: 'profile_candidate', research_id: researchId, experiment_id: experimentId,
       kernel_ref: measured.build.kernel_ref, source_hash: measured.build.source_hash,
-      environment_ref: measured.build.environment_ref, execution_backend: 'ssh', simulated: false, instrumented: true,
-      observations: measured.receipt.rows.map(row => ({ case_id: row.case_id, metric: 'kernel_time_us', value: row.median_us!, unit: 'us' })),
+      environment_ref: measured.build.environment_ref, execution_backend: 'ssh', simulated: false, instrumented: false,
+      measurement_kind: 'acl_event_interval',
+      observations: measured.receipt.rows.map(row => ({ case_id: row.case_id, metric: 'kernel_time_us', value: row.median_us!, unit: 'us', measurement_kind: 'acl_event_interval' })),
+      raw_profiles: measured.receipt.rows.map(row => ({
+        case_id: row.case_id, status: row.status, device_execution: row.device_execution,
+        input_hash: row.input_hash, oracle_hash: row.oracle_hash,
+      })),
       ...changes,
     };
     const ref = receiptRef(project, join(experimentDir(project, researchId, experimentId), 'profiles', receipt.profile_id + '.json'));
@@ -274,6 +272,15 @@ test('a real profile with a matching experiment build supports a zero-kernel con
   assert.equal(report.research_goal_met, true);
   assert.equal(report.verdict, 'SUPPORTED');
   assert.equal(report.submitted_kernel_count, 0);
+});
+
+test('a real profile cannot stand in for device execution proof from raw PASS rows', t => {
+  const env = setup(t);
+  const profile = env.profile({ raw_profiles: [] } as Partial<ProfileReceipt>);
+  const submission = env.submission();
+  submission.experiments[0].full_size_test_refs = [];
+  submission.experiments[0].profile_refs = [profile.ref];
+  rejected(() => prepareSubmission(env.project, submission), 'Profile evidence must include raw device execution proof');
 });
 
 const invalidProfiles: Array<{ name: string; changes: Partial<ProfileReceipt> }> = [

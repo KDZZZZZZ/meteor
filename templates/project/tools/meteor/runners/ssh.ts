@@ -8,6 +8,7 @@ import { loadSshProfile } from '../profiles.ts';
 import { assert, hashObject, inside, readJson, sha256, writeImmutable } from '../util.ts';
 import type { BuildRequest, ProfileRequest, Runner, TestRequest } from './contract.ts';
 import { selectCases, summarizeRows } from './contract.ts';
+import { hasDeviceExecution } from '../device-evidence.ts';
 
 const BOOTSTRAP = `import hashlib,json,subprocess,sys,base64,os,tempfile
 from pathlib import Path
@@ -36,7 +37,7 @@ sys.exit(result.returncode)
 function shellQuote(value: string) { return "'" + value.replaceAll("'", "'\\''") + "'"; }
 function bundleFiles() {
   const root = fileURLToPath(new URL('./remote/', import.meta.url));
-  return Object.fromEntries(readdirSync(root).filter(name => /^(CMakeLists\.txt|README\.md)$/.test(name) || /\.(py|asc|txt)$/.test(name)).map(name => {
+  return Object.fromEntries(readdirSync(root).filter(name => /^(CMakeLists\.txt|README\.md)$/.test(name) || /\.(py|asc|txt|cpp|h)$/.test(name)).map(name => {
     const data = readFileSync(join(root, name));
     return [name, { base64: data.toString('base64'), sha256: sha256(data) }];
   }));
@@ -61,11 +62,15 @@ function releaseConfirmed(result: any): boolean {
 export async function remoteRequest(project: Project, request: any, signal?: AbortSignal): Promise<any> {
   signal?.throwIfAborted();
   const profile = loadSshProfile(project.config.execution.profile_ref);
-  assert(profile.env_script && profile.npu_arch, 'SSH profile requires env_script and npu_arch before execution');
+  assert(profile.env_script, 'SSH profile requires env_script before execution');
+  const environment = project.config.environment;
+  const deviceId = request.action === 'hardware' ? profile.device_id : environment.device_id ?? profile.device_id;
+  const npuArch = request.action === 'hardware' ? profile.npu_arch : environment.npu_arch ?? profile.npu_arch;
   const files = bundleFiles();
   const body = { remote_root: profile.remote_root, env_script: profile.env_script, driver_path: profile.driver_path,
     bundle_hash: hashObject(files), files, request: { ...request, remote_root: profile.remote_root,
-      env_script: profile.env_script, device_id: Number(profile.device_id ?? '0'), npu_arch: profile.npu_arch } };
+      env_script: profile.env_script, ...(deviceId === undefined ? {} : { device_id: Number(deviceId) }),
+      ...(npuArch === undefined ? {} : { npu_arch: npuArch }) } };
   const args = ['-T', '-o', 'BatchMode=yes', '-o', `ConnectTimeout=${profile.connect_timeout_seconds ?? 15}`, profile.ssh_alias,
     'python3 -c ' + shellQuote(BOOTSTRAP)];
   return await new Promise(resolveResult => {
@@ -167,6 +172,7 @@ export class SshRunner implements Runner {
     else {
       const payload = { ...common(request.project), action: 'test', build_id: request.build.remote_build_id,
         artifact_hash: request.build.artifact_hash, rendered_source_hash: request.build.rendered_source_hash,
+        kernel_name: request.module.symbol_prefix,
         cases: casesPayload(request.project, selected, request.module.supported_case_ids), supported_case_ids: request.module.supported_case_ids };
       result = await remoteRequest(request.project, { ...payload, request_id: remoteIdempotency('test', request.idempotency_key) }, request.signal);
     }
@@ -183,6 +189,8 @@ export class SshRunner implements Runner {
         assert(request.module.supported_case_ids.includes(c.case_id) && Array.isArray(remote.samples_us) && remote.samples_us.length === 5 && remote.samples_us.every((x: unknown) => typeof x === 'number' && Number.isFinite(x) && x > 0), 'Invalid real timing samples');
         assert(remote.input_hash === c.input_hash, 'Remote PASS input hash mismatch');
         assert(remote.oracle_hash === c.oracle_hash, 'Remote PASS oracle hash mismatch');
+        assert(hasDeviceExecution(remote.device_execution, request.project.config.environment.device_id, request.module.symbol_prefix),
+          'Remote PASS requires matching candidate device execution evidence; ACL event timing alone is insufficient');
       } else {
         assert(remote.input_hash === undefined || remote.input_hash === c.input_hash, 'Remote input hash mismatch');
         assert(remote.oracle_hash === undefined || remote.oracle_hash === c.oracle_hash, 'Remote oracle hash mismatch');
@@ -190,7 +198,8 @@ export class SshRunner implements Runner {
       const samples = remote.status === 'PASS' ? remote.samples_us : [];
       return { case_id: c.case_id, status: remote.status, samples_us: samples,
         median_us: samples.length ? [...samples].sort((a:number,b:number)=>a-b)[Math.floor(samples.length/2)] : undefined, reason: remote.reason ?? undefined,
-        actual_kernel_ref: request.build.kernel_ref, source_hash: request.build.source_hash, input_hash: c.input_hash, oracle_hash: c.oracle_hash };
+        actual_kernel_ref: request.build.kernel_ref, source_hash: request.build.source_hash, input_hash: c.input_hash, oracle_hash: c.oracle_hash,
+        device_execution: remote.device_execution };
     });
     const raw = rawRef(request.project, result);
     return { run_id: hashObject({ build: request.build.build_id, mode: request.mode, raw }).slice(0,24),
@@ -206,7 +215,7 @@ export class SshRunner implements Runner {
     const payload = { ...common(request.project), action: 'profile', build_id: request.build.remote_build_id, artifact_hash: request.build.artifact_hash,
       rendered_source_hash: request.build.rendered_source_hash,
       cases: casesPayload(request.project, selectCases(request.project, 'probe', request.case_ids), request.module.supported_case_ids),
-      supported_case_ids: request.module.supported_case_ids, metrics: request.metrics };
+      supported_case_ids: request.module.supported_case_ids, kernel_name: request.module.symbol_prefix, metrics: request.metrics };
     const result = await remoteRequest(request.project, { ...payload, request_id: remoteIdempotency('profile', request.idempotency_key) }, request.signal);
     const raw = rawRef(request.project, result);
     if (result.status === 'COMPLETED') {
@@ -218,6 +227,7 @@ export class SshRunner implements Runner {
       const expected = request.project.suite.cases.find(c => c.case_id === row.case_id);
       if (expected) {
         if (row.status === 'PASS') {
+          assert(hasDeviceExecution(row.device_execution, request.project.config.environment.device_id, request.module.symbol_prefix), 'Remote profile PASS requires candidate device execution evidence');
           assert(row.input_hash === expected.input_hash, 'Remote profile PASS input hash mismatch');
           assert(row.oracle_hash === expected.oracle_hash, 'Remote profile PASS oracle hash mismatch');
         } else {
@@ -229,7 +239,10 @@ export class SshRunner implements Runner {
     return { profile_id: hashObject({ build: request.build.build_id, raw }).slice(0,24), research_id: request.build.research_id,
       experiment_id: request.build.experiment_id, kernel_ref: request.build.kernel_ref, source_hash: request.build.source_hash,
       environment_ref: request.project.config.environment.environment_ref, execution_backend: 'ssh', simulated: false,
-      instrumented: true, observations: result.observations, remote_request_id: result.request_id,
+      instrumented: result.instrumented === true, measurement_kind: result.measurement_kind ?? 'acl_event_interval',
+      supported_metrics: result.supported_metrics ?? ['kernel_time_us'], observations: result.observations, remote_request_id: result.request_id,
+      raw_profiles: (result.raw_profiles ?? []).map((row: any) => ({ case_id: row.case_id, status: row.status,
+        device_execution: row.device_execution, input_hash: row.input_hash, oracle_hash: row.oracle_hash })),
       raw_receipt_ref: raw, remote_release_confirmed: releaseConfirmed(result) } as ProfileReceipt;
   }
   async pollRemote(project: Project, remoteRequestId: string) {

@@ -14,7 +14,7 @@ import { writeJson } from '../templates/project/tools/meteor/util.ts';
 import type { Experiment, Hypothesis, KernelModule, KernelSubmission, Submission } from '../templates/project/tools/meteor/contracts.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'meteor-demo-'));
-initProject(root, { git: false });
+initProject(root, { git: false, backend: 'mock' });
 const project = loadProject(root);
 const research = createResearch(project, { research_id: 'mock-demonstration', chief_id: 'demo-chief', agent_session_id: 'pending', goal: 'Exercise two controlled experiments and the evidence contract' });
 bindResearchSession(project, research.research_id, 'demo-one-continuous-session');

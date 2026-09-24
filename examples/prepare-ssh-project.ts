@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { initProject } from '../src/init.ts';
+import { probeHardware } from '../src/hardware.ts';
 import { readJson, writeJson, sha256, hashObject } from '../templates/project/tools/meteor/util.ts';
 import type { CaseSuite, MeteorConfig } from '../templates/project/tools/meteor/contracts.ts';
 
@@ -29,7 +30,6 @@ writeJson(join(root, 'asc/case-suite.json'), suite);
 const config = readJson<MeteorConfig>(join(root, 'meteor.config.json'));
 config.budget = { max_experiments: 12, max_wall_time_seconds: 3600 };
 writeJson(join(root, 'meteor.config.json'), config);
-writeJson(join(root, '.meteor.local.json'), { execution: { backend: 'ssh', profile_ref: profileRef },
-  environment: { environment_ref: 'Ascend910-CANN9.0.0-dav2201-device0', hardware: 'Ascend910', toolchain: 'CANN9.0.0-dav2201', measurement_protocol_ref: 'acl-event-3warmup-5samples-v1', simulated: false } });
+const hardware = await probeHardware(root, profileRef);
 mkdirSync(join(root, 'reports/live-dsh'), { recursive: true });
-console.log(JSON.stringify({ root, backend: 'ssh', suite: suite.revision, case_count: suite.cases.length, connected: false }, null, 2));
+console.log(JSON.stringify({ root, suite: suite.revision, case_count: suite.cases.length, hardware }, null, 2));

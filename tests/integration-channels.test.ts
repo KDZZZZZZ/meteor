@@ -38,7 +38,7 @@ function queuedResearch(project: Project, id: string) {
 
 function projectFixture(): Project {
   const root = mkdtempSync(join(tmpdir(), 'meteor-integration-channels-'));
-  initProject(root, { git: false });
+  initProject(root, { git: false, backend: 'mock' });
   return loadProject(root);
 }
 

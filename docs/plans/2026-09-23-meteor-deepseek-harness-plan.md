@@ -12,7 +12,9 @@
 
 **集成时机：** subagent 结束并完成有效交付后，宿主自动触发集成程序，依据 subagent 已提交的逐 case 全尺寸性能数据生成 shape 分桶、路由和新的 version。chief 无须手动调用集成或补跑测试，只接收研究报告和集成回执。研究实验直接运行单个 kernel；version 是多个 kernel 按 case shape 路由的集成产物。
 
-**运行与访问：** 默认使用 mock，可通过集中 profile 切换到 SSH backend。连接凭据集中管理，项目只保存 profile 引用。chief 可访问全部文件并负责配置；subagent 也可读取当前运行环境中所有文件，遵循原有操作系统权限。分发的 kernel/知识仅用于启发，鼓励主动阅读其他实现、知识和实验记录。
+**运行与访问：** 默认状态为 `unconfigured`。chief 通过 `meteor_hardware_probe(profile_ref?)` 接通集中 SSH profile、调试真实设备并读取生成的硬件报告；未配置或未就绪时不启动研究。连接凭据集中管理，项目只保存 profile 引用。chief 可访问全部文件并负责配置；subagent 也可读取当前运行环境中所有文件，遵循原有操作系统权限。分发的 kernel/知识仅用于启发，鼓励主动阅读其他实现、知识和实验记录。
+
+**2026-09-24 需求修订：** 早期“先 mock、默认 mock、无 SSH 也 ready_mock”的准备方案已被用户的新要求覆盖。mock 保留为显式协议测试能力；初始化不再填入占位设备事实，也不回退到 mock。旧实验、报告和版本记录保留原样，不追认其中缺失的目标设备执行证明。
 
 **当前交付范围：** 本文记录已实现的研究协议、目标完成条件、skill、文件架构和提示词大纲；[version 模板](../../templates/project/asc/version.asc.tmpl)用于研究结束后的集成，[single-kernel 模板](../../templates/project/asc/kernel_test.asc.tmpl)用于实验包装。mock backend、结构化 SQLite 经验库、提交校验、自动 version 装配和 DSH `0.1.7-alpha.2` 宿主接入已落到模板代码；SSH backend 通过集中 profile 启用，真实硬件验证结果另行记录。按用户选择使用 alpha.2，DSH 接口依据安装包和已核实的官方 commit `00102833dfaee1da9f48a3a8eae9d34005a75218`。
 
@@ -20,7 +22,7 @@
 
 | 主体 | 职责 |
 | --- | --- |
-| live/chief | 按用户目标自行初始化并核对配置，读取少量内部证据与厂商官方资料形成假设；选择初始材料，管理已授权持续目标、预算与并行度；收取报告和自动集成回执，改进供未来快照使用的 persona/skill |
+| live/chief | 按用户目标自行初始化、连接集中 profile、调试真实设备并读取硬件报告；读取少量内部证据与厂商官方资料形成假设；选择初始材料，管理已授权持续目标、预算与并行度；收取报告和自动集成回执，改进供未来快照使用的 persona/skill |
 | 研究 subagent | 验证给定假设并补齐实验定义，缺省时才自主提出假设；自主循环实验和分析，对自己编写并提交的 kernel 完成独立全尺寸测试，提交结论、可选 kernel、适用范围及完整性能数据 |
 | 测试与分析 skill | 在同一 Agent 上下文中提供实验方法、操作步骤和结果解释规范；由 Agent 决定何时、带什么参数调用 |
 | meteor 宿主与底层工具 | 管理 session/job、运行请求、设备锁、回执、不可变实验记录、提交校验和幂等入库；有效交付后自动投递集成任务 |
@@ -29,7 +31,7 @@
 
 ```mermaid
 flowchart TD
-    C[chief：配置、选择材料模式、可给定假设] --> S[随机或指定分发启发材料]
+    C[chief：设备探测与报告就绪、选择材料、可给定假设] --> S[随机或指定分发启发材料]
     S --> H[subagent：固定给定或自主提出的假设]
     H --> D[设计实验并编写 kernel]
     D --> T[调用单 kernel 测试 skill]
@@ -62,7 +64,7 @@ flowchart TD
 
 ### 1.1 Chief 的默认操作职责
 
-用户给出简短研究目标即可，操作要求保存在现有两个 skill 的 Chief 分段。未初始化目录先由 chief 调用 `meteor_init`；随后读取合并后的项目配置和算子约定，配置齐全就尽快启动。需要明确假设时，只读取足够的相关库材料、内部文件和厂商官方 web 资料，不把穷尽源码、旧日志或手工 SSH 探测作为每轮前置条件。
+用户给出简短研究目标即可，操作要求保存在现有两个 skill 的 Chief 分段。未初始化目录先由 chief 调用 `meteor_init`；随后读取合并后的项目配置和算子约定，调用 `meteor_hardware_probe(profile_ref?)` 调试真实设备并读取报告中的 setup 状态、身份与能力。设备报告就绪且研究目标明确后尽快启动。已有报告失效、profile 或工具链变化时重新探测；缺失配置时指出具体缺项，不以占位配置或 mock 启动研究。需要明确假设时，只读取足够的相关库材料、内部文件和厂商官方 web 资料，不把穷尽源码、旧日志作为每轮前置条件。
 
 持续目标先以一个 research 验证调用、工具往返、报告和自动集成能稳定完成，再由 chief 按既定总预算、单研究预算、设备能力及在途请求决定并行度。原生 jobs 提供等待与完成通知；宿主可用的持久目标能力保存总目标和进度。报告及自动集成均完成后，若总目标未完成且预算允许，chief 选择下一假设、材料和新的 research ID。单轮 CLOSED 不等于总目标完成，不能用新 ID 绕过预算；远端请求未知时先查询/收取原任务，禁止重复启动同一工作。
 
@@ -119,7 +121,7 @@ kernel 全尺寸排名、是否击败当前最佳实现、是否产生可集成�
 
 | 步骤 | 主体 | 行为 |
 | --- | --- | --- |
-| 1. 启动与初始上下文 | chief / 程序 | 分配 research ID、预算和固定 case 全集；选择默认或本轮配置的随机抽样，或指定 kernel/知识，可同时给定待验证假设；记录 chief 输入与实际分发，创建一个连续 subagent |
+| 1. 启动与初始上下文 | chief / 程序 | 确认真实设备报告当前有效且就绪；分配 research ID、预算和固定 case 全集；选择默认或本轮配置的随机抽样，或指定 kernel/知识，可同时给定待验证假设；记录 chief 输入与实际分发，创建一个连续 subagent |
 | 2. 固定假设与判定标准 | subagent | 有给定假设时保留原文并补齐实验定义，缺省时才自主提出；明确 scope、预测、对照和反证条件，继续自主阅读和选择实现 |
 | 3. 设计实验并编写 kernel | 同一 subagent | 实现干预与对照，可生成多个实验 kernel、消融版本或新 revision |
 | 4. 调用测试 skill | 同一 subagent | 自主安排构建、调试、单 kernel 全尺寸测试和必要复测，获得独立回执 |
@@ -143,7 +145,7 @@ kernel 全尺寸排名、是否击败当前最佳实现、是否产生可集成�
 
 - **输入：** research/hypothesis/experiment ID、一个 kernel revision、实验计划、case suite revision、oracle、环境 profile 和测试目的。
 - **由 Agent 决定并负责完成：** 何时构建、是否先做局部调试、何时全尺寸测试、需要哪些重复或对照。编写 subagent 必须在提交 kernel 前完成测试、检查回执并提交完整数据；进入实验的 kernel 必须形成独立全尺寸记录。
-- **方法：** 固定源码与环境身份，用单 kernel 模板构建，核对实际调用实现，记录逐 case 正确性、耗时和失败/unsupported 原因；修改源码后建立新 revision。
+- **方法：** 固定源码、硬件报告与环境身份，用单 kernel 模板构建，核对实际调用实现，记录逐 case 正确性、耗时和失败/unsupported 原因；修改源码后建立新 revision。真实 PASS 要求正确输出和匹配该目标 kernel 的设备执行证明，SSH 成功或 simulated:false 不足以通过；禁止占位 device kernel 配合 Host CPU/NEON 替算。
 - **输出：** build/run ID、源码/ELF/环境哈希、全尺寸矩阵、覆盖状态、测量原始样本、错误和证据引用。
 - **边界：** 不生成 shape 分桶、不装配 version、不运行集成版，也不决定假设真假。
 
@@ -340,7 +342,7 @@ meteor/                                  # 插件源代码与项目模板
 
 ```text
 <chief 当前目录>/
-  meteor.config.json                     # mock 默认、预算、抽样、case suite、连接引用
+  meteor.config.json                     # 默认 unconfigured、预算、抽样、case suite、集中连接引用
   prompts/meteor.md                      # 唯一研究 subagent 基础提示词
   .dsh/skills/
     meteor-kernel-test/SKILL.md           # Agent 主动使用的独立 kernel 测试方法
@@ -392,7 +394,7 @@ meteor/                                  # 插件源代码与项目模板
 
 `meteor_init` 在当前 cwd 复用现有 Git 根或初始化 Git，生成项目代码、两个 skill、唯一基础提示词、模板和 schema；不自动创建远端或提交。已有源码首次导入由 chief 适配为模块，保留来源和验证状态。
 
-重复 init 仅补缺失文件，对 chief 已修改的文件提供差异；不覆盖用户修改。没有 SSH 配置也可 `ready_mock`；真实实验要求用户提供连接 profile、可用 case/oracle 与硬件环境，未满足则报告配置缺口。
+重复 init 仅补缺失文件，对 chief 已修改的文件提供差异；不覆盖用户修改。没有 SSH 配置时保持 `unconfigured`。chief 使用 `meteor_hardware_probe(profile_ref?)` 接通已有集中配置，调试设备并生成硬件报告；可用 case/oracle、设备及工具链未满足时报告缺口，不启动真实研究。CLI 对应 `meteor hardware [directory] [profile-ref]`。
 
 chief 的文件访问与配置能力保持开放，可据已完成报告改进项目 persona/skill 并供未来快照使用。subagent 可写自己的假设、实验计划、kernel 草稿、分析和工作记忆；不可变证据、共享库与集成产物由对应工具提交。运行中的快照不修改；subagent 仍可读取新材料，实际采用时固定引用。快照不复制凭据。
 
@@ -461,6 +463,7 @@ chief 可选的给定假设、manifest/seed、算子与模块契约、固定 cas
 | chief 工具 | 行为 |
 | --- | --- |
 | `meteor_init` | 初始化/维护当前项目的代码、skill、模板和库结构 |
+| `meteor_hardware_probe` | 可带 profile_ref，连接集中 SSH 配置、调试真实设备，返回硬件报告、能力和 setup 状态；不替代研究 kernel 的全尺寸测试 |
 | `meteor_start` | 启动一个连续研究 subagent；传入目标、可选 ID/预算、随机或指定初始上下文，以及可选的待验证假设；case suite 和 backend/profile 取自项目配置 |
 | `meteor_status` | 查询研究状态、实验进度、判定、kernel 提交、自动集成状态和报告 |
 | `meteor_control` | 协作式暂停、继续或取消原研究任务 |
@@ -494,7 +497,7 @@ type MeteorStartInput = {
 };
 ```
 
-省略 `initial_context` 等同默认随机分发；`sampling` 仅供 random 模式调整本轮参数，specified 按给定引用分发。hypothesis 可与任一模式组合；指定材料是参考，指定假设是验证目标。Chief 核对项目配置后即可启动，使用已有的一份 persona 与两个 skill。示例见 [README](../../README.md#starting-a-research-task)。
+省略 `initial_context` 等同默认随机分发；`sampling` 仅供 random 模式调整本轮参数，specified 按给定引用分发。hypothesis 可与任一模式组合；指定材料是参考，指定假设是验证目标。Chief 核对项目配置及当前有效、已就绪的硬件报告后启动，使用已有的一份 persona 与两个 skill。示例见 [README](../../README.md#starting-a-research-task)。
 
 集成作为宿主内部的提交事件处理能力，不要求 chief 使用单独的集成工具；chief 通过 `meteor_status / meteor_evidence` 获取自动生成的 version 和回执。
 
@@ -506,22 +509,26 @@ Agent 工具白名单包含全文件读取、研究写入、skill 及实验请�
 
 Chief 可根据真实 DSH 行为与研究报告中的明确缺口修改项目 `prompts/meteor.md` 或对应 skill，再启动使用新快照的研究。不得改动正在运行的 snapshot、追加人工提示、代写最终结果，或手工修补研究结论。模型/API 可用性与一轮完整研究的稳定性单独验证；无模型兼容性 smoke 不作为持续执行稳定性的证明。
 
-### 10.2 先 mock，集中配置 SSH
+### 10.2 默认未配置，Chief 准备真实 SSH 设备
 
-`RemoteRunner` 提供 prepare/submit/poll/cancel/collect，请求包含 research/experiment ID、kernel revision、幂等键、case/环境身份和 backend。mock 默认配置：
+`RemoteRunner` 提供 prepare/submit/poll/cancel/collect，请求包含 research/experiment ID、kernel revision、幂等键、case/环境身份和 backend。新初始化工程的配置：
 
 ```json
 {
   "execution": {
-    "backend": "mock",
-    "profile_ref": "mock-qmq-v1"
+    "backend": "unconfigured",
+    "profile_ref": ""
   }
 }
 ```
 
-mock 演练多轮实验、全尺寸矩阵、profile、失败、证据冲突、未决收尾和最后集成；回执均标记 `simulated=true` 及 fixture ID，不调用 SSH、CANN 编译器或 NPU。程序验证记录、控制流程和数据关系；不能据此宣称真实假设或性能已验证。
+chief 调用 `meteor_hardware_probe(profile_ref?)`，或使用 CLI `meteor hardware [directory] [profile-ref]`，连接已存在的集中 profile。报告记录实际设备/芯片及逻辑映射、健康、可用内存、核数与架构、工具链，以及真实小型 kernel 的编译、launch、正确性和采集结果。硬件事实来自原始查询与探测；不可从示例值、SoC 名称猜测或无 NPU 的平台配置补造。Chief 读取 setup 状态和失败原因并调试，未就绪时停止启动研究。
+
+显式协议测试仍可使用 mock 演练多轮实验、全尺寸矩阵、profile、失败、证据冲突、未决收尾和最后集成；回执均标记 `simulated=true` 及 fixture ID，不调用 SSH、CANN 编译器或 NPU。它验证记录、控制流程和数据关系，不能作为设备未配置时的默认路径，也不能证明真实假设或性能。
 
 用户提供集中 profile 后，由 chief 协助配置。项目只保存引用，宿主运行时解析系统 SSH host alias/agent 或统一凭据提供方；不把私钥、密码、令牌复制到模板、提示词、seed、快照、日志或报告。全文件可读不意味着自动把凭据注入上下文。
+
+每个真实 kernel 的 PASS 还需对应精确实现及 case 的目标设备执行证明；初始化探测结果或任意 AI Core 任务不能代替它。性能工具能力取自 `hardware.supported_metrics`：当前 `kernel_time_us` 是声明计时范围的 ACL event 时间，不是硬件计数器；`device_task_time_us` 仅在实际实现并通过能力报告公布后可用。[Ascend 测量指导](../ascend-measurement-guide.md)中的官方 CLI 为核对本机版本后的手动诊断参考，不表示 Meteor 接口已经暴露全部 profiler 特性。常态计时与插桩采集分开解释，机制证据按具体假设选择。
 
 SSH adapter 可复用用户原 workspace 中的 `tools/remote_npu/bootstrap_environment.py`、`run_sequence_plan.py`、`run_batch.py` 和 `collect_evidence.py` 思路，先适配为单 kernel 实验身份与显式 unsupported 记录，再接入真实运行。连接传递集中管理，避免复制或回显凭据；本文不把这些远端 harness 记为厂商源码。
 
@@ -550,11 +557,11 @@ SUBMISSION_COMMITTED → QUEUED → SELECTING → ASSEMBLING → ASSEMBLED
 
 | 顺序 | 交付 | 验收要求 |
 | --- | --- | --- |
-| 1 | 初始化与项目契约 | 默认 mock；仓库、唯一 persona、两个 skill、两种模板清晰；重复 init 保留 chief 修改 |
+| 1 | 初始化与项目契约 | 默认 unconfigured，无占位硬件事实；chief 连接集中 profile、调试设备并读取就绪报告；仓库、唯一 persona、两个 skill、两种模板清晰；重复 init 保留 chief 修改 |
 | 1a | chief 启动输入 | 默认随机、仅本轮随机参数、指定 kernel/知识无随机混入；两种模式均可给定假设，缺省才自主提出；manifest/seed 可核对输入与实际分发，修订保留原假设原文与状态 |
 | 1b | Chief skill 发现与持续目标 | 未初始化 cwd 可加载含 meteor_init 的包内 skill；嵌套工程优先本项目 skill，child 保留冻结正文；用户只给目标可启动，稳定首轮后按授权/预算继续，提示词改进仅影响未来快照 |
 | 2 | 研究身份和证据库 | 一个 research 下多轮实验、多 kernel/revision；所有证据可追溯，提交幂等、mock/真实隔离 |
-| 3 | 单 kernel 测试工具及 skill | 每个 kernel 独立遍历 case 全集；编写 subagent 在提交前完成全尺寸测试；缺行、部分执行、源码/环境不匹配或只交摘要均拒收并退回原 Agent；无跨实现回退，probe 不替代 full |
+| 3 | 单 kernel 测试工具及 skill | 每个 kernel 独立遍历 case 全集；编写 subagent 在提交前完成全尺寸测试；真实 PASS 同时满足正确性、目标设备执行证明及有效计时口径；缺行、部分执行、源码/环境不匹配或只交摘要均拒收并退回原 Agent；无 CPU 替算、占位 kernel 或跨实现回退，probe 不替代 full |
 | 4 | 性能分析 skill | Agent 控制 profile、对照、复测与消融；能根据返回证据重新编码，宿主不自动分桶或结束 |
 | 5 | 目标判定与交付 | 覆盖“全尺寸最优但假设被证伪”“全尺寸更差但机制假设得到支持”“支持且零 kernel 提交”“预算耗尽仍未决”；与总耗时有关的原预测必须单独检验 |
 | 6 | 同会话连续研究 | 至少两轮编码/实验/分析、两个 skill 和一次真实 compaction，session ID 不变；假设原文、判定标准及反例可恢复 |

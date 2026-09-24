@@ -23,7 +23,7 @@ function tempRoot(t: TestContext) {
 
 async function setup(t: TestContext) {
   const root = tempRoot(t);
-  initProject(root, { git: false });
+  initProject(root, { git: false, backend: 'mock' });
   const project = loadProject(root);
   const kernelPath = 'kernels/seed_kernel/r1';
   const module: KernelModule = {
@@ -78,6 +78,8 @@ async function setup(t: TestContext) {
 test('initial context defaults to random and normalizes a detached specified selection', () => {
   assert.deepEqual(normalizeInitialContext(), { mode: 'random' });
   assert.deepEqual(normalizeInitialContext({}), { mode: 'random' });
+  assert.deepEqual(normalizeInitialContext({ mode: 'random', kernel_refs: [], knowledge_refs: [], sampling: { count: 4 } }), { mode: 'random', sampling: { count: 4 } });
+  assert.deepEqual(normalizeInitialContext({ mode: 'specified', sampling: {} }), { mode: 'specified' });
   const input = { mode: 'specified', kernel_refs: [' seed_kernel@r1 ', 'seed_kernel@r1'], knowledge_refs: ['claim_primary'] };
   const result = normalizeInitialContext(input);
   assert.deepEqual(result, { mode: 'specified', kernel_refs: ['seed_kernel@r1'], knowledge_refs: ['claim_primary'] });
@@ -88,8 +90,9 @@ test('initial context defaults to random and normalizes a detached specified sel
 
 test('initial context rejects conflicting modes, unknown options, and invalid sampling values', () => {
   const invalid: unknown[] = [
-    null, [], 'random', { mode: 'other' }, { mode: 'random', kernel_refs: [] }, { mode: 'random', knowledge_refs: ['claim_primary'] },
-    { mode: 'specified', sampling: {} }, { mode: 'specified', kernel_refs: [42] }, { mode: 'specified', knowledge_refs: [' '] },
+    null, [], 'random', { mode: 'other' }, { mode: 'random', kernel_refs: ['seed_kernel@r1'] }, { mode: 'random', knowledge_refs: ['claim_primary'] },
+    { mode: 'random', kernel_refs: null }, { mode: 'random', knowledge_refs: '' },
+    { mode: 'specified', sampling: { count: 1 } }, { mode: 'specified', kernel_refs: [42] }, { mode: 'specified', knowledge_refs: [' '] },
     { mode: 'random', typo: true }, { mode: 'random', sampling: null }, { mode: 'random', sampling: { typo: 1 } },
     ...[{ count: -1 }, { count: 1.5 }, { seed: -1 }, { seed: 0x100000000 }, { seed: 1.5 }, { epsilon: -0.1 }, { epsilon: 1.1 },
       { lambda: -1 }, { lambda: Infinity }, { tau_hours: 0 }, { tau_hours: NaN }, { count: '2' }].map(sampling => ({ mode: 'random', sampling })),

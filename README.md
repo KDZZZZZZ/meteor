@@ -2,7 +2,7 @@
 
 DeepSeek Harness plugin for hypothesis-driven Ascend C kernel research.
 
-meteor lets a chief agent initialize a local research workspace, start one continuous research subagent per `research_id`, run mock or configured SSH-backed kernel experiments, validate full-size single-kernel evidence, store structured knowledge in SQLite, and automatically assemble a routed version after a valid final submission.
+meteor lets a chief agent initialize a local research workspace, prepare a real SSH device and hardware report, start one continuous research subagent per `research_id`, validate full-size single-kernel evidence, store structured knowledge in SQLite, and automatically assemble a routed version after a valid final submission. Mock execution is reserved for explicitly selected protocol tests.
 
 ## Requirements
 
@@ -17,16 +17,19 @@ The project uses Node 24 native TypeScript execution in tests and the Python sta
 ```bash
 npm run build
 node dist/src/cli.js init
-npm run demo
+node dist/src/cli.js hardware . my-central-profile
 ```
 
-`init` writes the project template into the current directory. The default backend is mock, so the demo does not require SSH, CANN, or NPU access.
+`init` writes the project template into the current directory with backend `unconfigured`. Replace `my-central-profile` with a configured central SSH profile reference. The CLI form is `meteor hardware [directory] [profile-ref]`; when the profile reference is omitted, it uses the project's configured reference. Inspect the returned hardware report, supported capabilities and setup status before starting research. Missing configuration or a failed device probe leaves the project unready.
+
+For a local protocol demonstration only, run `npm run demo`. It explicitly selects mock fixtures and does not require SSH, CANN or an NPU; it does not establish device readiness or hardware performance.
 
 ## DSH Web Loading
 
 meteor targets DSH **0.1.7-alpha.2**. In DSH Web, load the plugin from this repository build output, then use the registered chief tools:
 
 - `meteor_init`
+- `meteor_hardware_probe`
 - `meteor_start`
 - `meteor_status`
 - `meteor_control`
@@ -34,7 +37,7 @@ meteor targets DSH **0.1.7-alpha.2**. In DSH Web, load the plugin from this repo
 
 The native run starts one spawned research Agent, keeps one session for the whole research loop, registers the two meteor skills into that child session, and accepts only a prepared submission from that same session.
 
-The UI user can give a short goal, such as “Investigate qmq kernel performance within the configured budget.” The existing `meteor-kernel-test` skill contains chief's initialization, startup, waiting and continuation duties. If the directory is not initialized, chief calls `meteor_init` and continues. The native `meteor-skills` integration uses a global provider for bundled defaults and a provider registered in chief's scope when that Agent is created, so current-project skills can take precedence over a parent Git repository's skills. Research children keep their frozen skill layer.
+The UI user can give a short goal, such as “Investigate qmq kernel performance within the configured budget.” The existing `meteor-kernel-test` skill contains chief's initialization, device preparation, startup, waiting and continuation duties. Chief calls `meteor_init` for a missing project, then `meteor_hardware_probe` with an optional `profile_ref`, reads the report and resolves setup failures before research. A successful probe records actual device/toolchain identity and capability; it does not replace the child's tests of its own kernels. The native `meteor-skills` integration uses a global provider for bundled defaults and a provider registered in chief's scope when that Agent is created, so current-project skills can take precedence over a parent Git repository's skills. Research children keep their frozen skill layer.
 
 ### Starting A Research Task
 
@@ -89,7 +92,7 @@ Distributed kernels and knowledge are inspiration. The child can read other mate
 
 ### Sustained Research
 
-Chief may inspect a small set of relevant internal files and library evidence, and use available web tools to consult official vendor material before assigning a hypothesis. Once configuration and the research objective are sufficient, it starts promptly instead of exhaustively reading source code or old logs.
+Chief may inspect a small set of relevant internal files and library evidence, and use available web tools to consult official vendor material before assigning a hypothesis. Once the hardware report is current and ready and the research objective is sufficient, it starts promptly instead of exhaustively reading source code or old logs.
 
 For an authorized sustained goal, chief first completes one research to check reliable calls, tool execution, reporting and automatic integration. After that succeeds, it chooses concurrency within the overall budget, each research's budget, and device capacity. It collects the research and integration receipts, evaluates progress toward the overall goal, and starts another distinct research when work and budget remain. Native jobs and available durable goal facilities track this work. Completing one research does not complete the overall goal, and starting another research does not reset its budget. Unknown remote requests must be queried or collected before retrying their work.
 
@@ -97,18 +100,26 @@ Chief decides each start. The plugin creates one child per `meteor_start` and do
 
 ## Execution Backends
 
-meteor starts in mock mode:
+meteor starts unconfigured:
 
 ```json
 {
   "execution": {
-    "backend": "mock",
-    "profile_ref": "mock-qmq-v1"
+    "backend": "unconfigured",
+    "profile_ref": ""
   }
 }
 ```
 
-SSH is enabled by changing the backend/profile configuration and providing a centralized SSH profile. The project stores only a profile reference. Private keys, passwords, and tokens must stay in the user’s SSH agent, host config, or external credential provider.
+Chief connects a centralized SSH profile through `meteor_hardware_probe`; the report establishes actual setup state. Do not fill device identity, memory, core counts or compiler architecture with example values. The project stores only a profile reference. Private keys, passwords, and tokens must stay in the user’s SSH agent, host config, or external credential provider.
+
+The initial prototype used default mock execution. The user's 2026-09-24 requirement supersedes that behavior: mock is an explicit protocol-test option, never a fallback for unavailable hardware. Existing historical receipts remain unchanged and do not gain device-execution proof retroactively.
+
+### Hardware Evidence And Measurement
+
+A real `PASS` requires correct output and evidence that the target kernel executed on the requested AI Core/Vector device. SSH success, `simulated:false`, nonzero event time, or an unrelated device task is insufficient. Host CPU/NEON substitution and placeholder device kernels are not accepted. The authoring subagent remains responsible for each delivered revision's full-size test; chief's setup probe is separate.
+
+Use `hardware.supported_metrics` and each tool's schema to select measurements. `kernel_time_us` is the runner's declared ACL event interval, not a hardware counter. `device_task_time_us` must not be requested or claimed unless the implemented capability is advertised in that report. Benchmark timing and profiler observations have different scopes and are kept separate. Official CLI examples in the [Ascend measurement guide](docs/ascend-measurement-guide.md) are manual diagnostic references to check against the installed version; they do not imply that every profiler feature is implemented by Meteor's tool interface.
 
 ## Research Shape
 

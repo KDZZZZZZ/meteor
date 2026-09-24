@@ -13,6 +13,6 @@
   "case_domain": "positive finite input scales; dimensions and inputs pinned by case-suite.json",
   "oracle": "tools/meteor/runners/remote/{gen_case.py,verify_case.py}",
   "correctness": "int8 output exact; yScale rtol=1e-4, atol=1e-4, maximum error fraction=1e-4",
-  "timing": "three warmups and five ACL event samples around run_kernel; excludes input/output transfers; host launcher must synchronize or return appropriate status",
+  "timing": "three warmups and five ACL event samples around run_kernel; event milliseconds converted to microseconds; excludes allocation, input/output transfers and CPU reference. Candidate host code may launch NPU computation, never compute the operator on CPU or hide host/device transfers. Separate msprof task-time=l1 evidence must match the candidate and device. Event intervals are not pure device instruction cycles.",
   "resource_note": "availableCoreNum reports Cube cores. AIV/memory capacity fields 0 mean unknown, never inferred from Cube cores."
 }

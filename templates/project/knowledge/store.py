@@ -46,6 +46,7 @@ def import_submission(args):
     envelope = json.loads(Path(args.commit_json).read_text(encoding="utf-8"))
     event = None
     report = None
+    validate_envelope(envelope)
     import_envelope(db, envelope, report, event)
     db.commit()
 
@@ -53,9 +54,58 @@ def import_submission(args):
 def commit_submission(args):
     payload = json.loads(sys_stdin())
     db = connect(args.knowledge_root)
+    validate_envelope(payload["commit"])
     with db:
         import_envelope(db, payload["commit"], payload["report"], payload["event"])
     print(json.dumps({"ok": True}))
+
+
+def validate_envelope(envelope):
+    require_path(envelope, "submission_id")
+    require_path(envelope, "submission_hash")
+    require_path(envelope, "committed_at")
+    submission = require_path(envelope, "submission")
+    require_path(submission, "research_id")
+    require_path(submission, "agent_session_id")
+    require_path(submission, "execution_backend")
+    hypothesis = require_path(submission, "hypothesis")
+    for key in ("hypothesis_id", "revision", "statement", "scope", "mechanism", "verdict"):
+        require_path(hypothesis, key, "submission.hypothesis")
+    for index, experiment in enumerate(require_list(submission, "experiments")):
+        base = f"submission.experiments.{index}"
+        for key in ("experiment_id", "hypothesis_revision", "question", "intervention", "analysis"):
+            require_path(experiment, key, base)
+    for index, kernel in enumerate(require_list(submission, "submitted_kernels")):
+        base = f"submission.submitted_kernels.{index}"
+        for key in (
+            "kernel_id", "revision", "source_hash", "case_suite_revision", "environment_ref",
+            "measurement_protocol_ref", "full_size_test_ref", "data_hash", "recommended_domain",
+            "supported_domain",
+        ):
+            require_path(kernel, key, base)
+    for index, claim in enumerate(require_list(submission, "knowledge_updates")):
+        base = f"submission.knowledge_updates.{index}"
+        for key in ("claim_id", "kind", "statement", "scope"):
+            require_path(claim, key, base)
+        require_list(claim, "evidence_refs", base)
+        require_list(claim, "related_material_ids", base)
+    chief_report = require_path(submission, "chief_report")
+    require_path(chief_report, "summary", "submission.chief_report")
+
+
+def require_path(value, key, base=None):
+    if not isinstance(value, dict) or key not in value:
+        path = f"{base}.{key}" if base else key
+        raise ValueError(f"Missing required submission field before knowledge import: {path}")
+    return value[key]
+
+
+def require_list(value, key, base=None):
+    current = require_path(value, key, base)
+    if not isinstance(current, list):
+        path = f"{base}.{key}" if base else key
+        raise ValueError(f"Required submission field must be a list before knowledge import: {path}")
+    return current
 
 
 def import_envelope(db, envelope, report=None, event=None):
@@ -439,6 +489,8 @@ def first_kernel_field(submission, key):
 
 def sys_stdin():
     import sys
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8")
     return sys.stdin.read()
 
 

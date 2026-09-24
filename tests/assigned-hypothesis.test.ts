@@ -1,11 +1,11 @@
 import test from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AssignedHypothesis, BuildReceipt, Hypothesis, Project, ResearchRecord, Submission, TestReceipt, Verdict } from '../templates/project/tools/meteor/contracts.ts';
-import { buildReceiptPath, experimentDir, receiptRef } from '../templates/project/tools/meteor/kernel-build.ts';
+import type { AssignedHypothesis, BuildReceipt, Hypothesis, KernelModule, Project, ResearchRecord, Submission, TestReceipt, Verdict } from '../templates/project/tools/meteor/contracts.ts';
+import { buildReceiptPath, computeSourceHash, experimentDir, receiptRef } from '../templates/project/tools/meteor/kernel-build.ts';
 import { commitSubmission, prepareSubmission, SubmissionValidationError } from '../templates/project/tools/meteor/submit.ts';
 import { hashObject, writeJson } from '../templates/project/tools/meteor/util.ts';
 
@@ -43,9 +43,20 @@ function setup(t: TestContext, assignment: AssignedHypothesis | null = assigned)
     ...(assignment ? { assigned_hypothesis: assignment } : {}),
   };
   writeJson(join(project.dataRoot, 'research', record.research_id, 'manifest.json'), record);
+  const module: KernelModule = {
+    kernel_id: 'candidate', revision: 'r1', operator_abi: 'qmq-v1', symbol_prefix: 'candidate_', launcher: 'candidate_launch',
+    device_file: 'fixtures/candidate/device.asc', host_file: 'fixtures/candidate/host.asc',
+    supported_case_ids: project.suite.cases.map(item => item.case_id), dependencies: [], hardware_scope: project.config.environment.hardware,
+    resource_constraints: [],
+  };
+  writeJson(join(root, 'fixtures/candidate/kernel.json'), module);
+  writeFileSync(join(root, module.device_file), '// Unit-test kernel fixture\n');
+  mkdirSync(join(root, 'fixtures/candidate'), { recursive: true });
+  writeFileSync(join(root, module.host_file), 'MeteorStatus candidate_launch(const MeteorCall&, const MeteorShape&, const MeteorResources&) { return MeteorStatus::Success; }\n');
+  const sourceHash = computeSourceHash(project, module);
   const build: BuildReceipt = {
     build_id: 'build_candidate', research_id: record.research_id, experiment_id: 'measurement_1',
-    kernel_ref: { kernel_id: 'candidate', revision: 'r1' }, source_hash: hashObject('fixture-source'), artifact_hash: hashObject('fixture-artifact'),
+    kernel_ref: { kernel_id: 'candidate', revision: 'r1' }, source_hash: sourceHash, artifact_hash: hashObject('fixture-artifact'),
     environment_ref: record.environment_ref, execution_backend: 'ssh', simulated: false, status: 'COMPLETED',
     source_ref: 'fixtures/candidate', module_ref: 'fixtures/candidate/kernel.json',
   };
@@ -54,6 +65,8 @@ function setup(t: TestContext, assignment: AssignedHypothesis | null = assigned)
   const rows: TestReceipt['rows'] = project.suite.cases.map((item, index) => ({
     case_id: item.case_id, status: 'PASS', samples_us: Array(5).fill(index ? 20 : 10), median_us: index ? 20 : 10,
     actual_kernel_ref: build.kernel_ref, source_hash: build.source_hash, input_hash: item.input_hash, oracle_hash: item.oracle_hash,
+    device_execution: { status: 'CONFIRMED', tool: 'unit-fixture',
+      matched_tasks: [{ case_id: item.case_id, device_id: 0, task_type: 'AI_CORE', op_name: 'candidate_device' }] },
   }));
   const receipt: TestReceipt = {
     run_id: 'run_candidate', research_id: record.research_id, experiment_id: build.experiment_id, kernel_ref: build.kernel_ref,
@@ -94,7 +107,9 @@ function setup(t: TestContext, assignment: AssignedHypothesis | null = assigned)
     const prepared = prepareSubmission(project, value);
     return commitSubmission(project, prepared.prepared_submission_id, value.agent_session_id);
   }
-  return { project, original, revised, submission, commit, receipt, ref };
+  function saveBuild(value: BuildReceipt) { writeJson(join(root, buildRef), value); }
+  function saveReceipt(value: TestReceipt) { writeJson(join(root, ref), value); }
+  return { project, original, revised, submission, commit, build, buildRef, module, receipt, ref, saveBuild, saveReceipt };
 }
 
 function issueCode(code: string) {
@@ -158,6 +173,41 @@ test('a historical verdict for the chief hypothesis must have real verifiable ev
   assert.throws(() => prepareSubmission(env.project, env.submission(env.revised('INCONCLUSIVE'), [original])), issueCode('MISSING_REAL_MEASUREMENT'));
   writeJson(join(env.project.root, env.ref), { ...env.receipt, simulated: true });
   assert.throws(() => prepareSubmission(env.project, env.submission(env.revised('INCONCLUSIVE'), [env.original('REFUTED')])), issueCode('SIMULATION_MISMATCH'));
+});
+
+test('real SSH PASS rows require target-kernel device execution proof', t => {
+  const env = setup(t);
+  const rows = env.receipt.rows.map(row => {
+    const { device_execution: _deviceExecution, ...withoutProof } = row;
+    return withoutProof;
+  });
+  writeJson(join(env.project.root, env.ref), { ...env.receipt, rows, data_hash: hashObject(rows) });
+  assert.throws(
+    () => prepareSubmission(env.project, env.submission(env.revised('INCONCLUSIVE'), [env.original('REFUTED')])),
+    issueCode('MISSING_DEVICE_EXECUTION'),
+  );
+});
+
+test('old SSH receipts cannot submit source that now violates the device-kernel contract', t => {
+  const env = setup(t);
+  writeFileSync(join(env.project.root, env.module.host_file), [
+    '#include <immintrin.h>',
+    'MeteorStatus candidate_launch(const MeteorCall&, const MeteorShape&, const MeteorResources&) {',
+    '  ASCENDC_CPU_DEBUG;',
+    '  return MeteorStatus::Success;',
+    '}',
+    '',
+  ].join('\n'));
+  const sourceHash = computeSourceHash(env.project, env.module);
+  const build = { ...env.build, source_hash: sourceHash };
+  const rows = env.receipt.rows.map(row => ({ ...row, source_hash: sourceHash }));
+  env.saveBuild(build);
+  env.saveReceipt({ ...env.receipt, source_hash: sourceHash, rows, data_hash: hashObject(rows) });
+
+  assert.throws(
+    () => prepareSubmission(env.project, env.submission(env.revised('INCONCLUSIVE'), [env.original('REFUTED')])),
+    issueCode('STALE_SOURCE'),
+  );
 });
 
 test('commit rechecks evidence for the chief hypothesis preserved in history', t => {

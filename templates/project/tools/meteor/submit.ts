@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import type { AssignedHypothesis, BuildReceipt, Case, Hypothesis, KernelSubmission, ProfileReceipt, Project, ResearchRecord, Submission, TestReceipt } from './contracts.ts';
 import { buildReceiptPath, experimentDir, validateBuildStillFresh } from './kernel-build.ts';
+import { hasDeviceExecution } from './device-evidence.ts';
 import { hashObject, inside, readJson, safeId, writeImmutable, writeJson } from './util.ts';
 import {
   type CommitEnvelope,
@@ -37,6 +38,7 @@ export interface PreparedSubmission {
   prepared_submission_id: string;
   submission_hash: string;
   submission_ref: string;
+  submitted_kernel_evidence: ResearchCommitReport['submitted_kernel_evidence'];
 }
 
 export interface ResearchCommitReport {
@@ -56,6 +58,19 @@ export interface ResearchCommitReport {
     unresolved: string[];
     next_steps: string[];
   };
+  submitted_kernel_evidence: Array<{
+    kernel_id: string;
+    revision: string;
+    full_size_test_ref: string;
+    receipt_path: string;
+    build_ref: string;
+    build_receipt_path: string;
+    module_ref: string;
+    module_path: string;
+    source_ref: string;
+    source_hash: string;
+    artifact_hash: string;
+  }>;
   integration_event_id: string;
   integration_event_ref: string;
 }
@@ -83,11 +98,11 @@ export function prepareSubmission(project: Project, submission: Submission): Pre
   if (existsSync(path)) {
     const existing = readJson<PreparedEnvelope>(path);
     if (existing.submission_hash === submissionHash && hashObject(existing.submission) === submissionHash) {
-      return { prepared_submission_id: preparedId, submission_hash: submissionHash, submission_ref: path };
+      return preparedSubmissionResult(project, preparedId, submissionHash, path, existing.submission);
     }
   }
   writeImmutable(path, envelope);
-  return { prepared_submission_id: preparedId, submission_hash: submissionHash, submission_ref: path };
+  return preparedSubmissionResult(project, preparedId, submissionHash, path, normalized);
 }
 
 export function commitSubmission(project: Project, preparedId: string, sessionId: string): ResearchCommitReport {
@@ -123,7 +138,7 @@ export function commitSubmission(project: Project, preparedId: string, sessionId
 
   const existingCommit = existsSync(commitPath) ? readJson<CommitEnvelope>(commitPath) : undefined;
   const committedAt = existingCommit?.committed_at ?? nowIso();
-  const report = buildReport(submission, researchGoalMet, goalHypothesis, reportRef, eventId, eventRef);
+  const report = buildReport(project, submission, researchGoalMet, goalHypothesis, reportRef, eventId, eventRef);
   const envelope: CommitEnvelope = {
     submission_id: submissionId,
     prepared_submission_id: prepared.prepared_submission_id,
@@ -175,7 +190,23 @@ function normalizeSubmission(submission: Submission): Submission {
   return JSON.parse(JSON.stringify(submission)) as Submission;
 }
 
+function preparedSubmissionResult(
+  project: Project,
+  preparedId: string,
+  submissionHash: string,
+  submissionRef: string,
+  submission: Submission,
+): PreparedSubmission {
+  return {
+    prepared_submission_id: preparedId,
+    submission_hash: submissionHash,
+    submission_ref: submissionRef,
+    submitted_kernel_evidence: submission.submitted_kernels.map(kernel => kernelEvidenceChain(project, kernel)),
+  };
+}
+
 function buildReport(
+  project: Project,
   submission: Submission,
   researchGoalMet: boolean,
   goalHypothesis: Hypothesis | undefined,
@@ -202,8 +233,29 @@ function buildReport(
       unresolved: submission.chief_report.unresolved,
       next_steps: submission.chief_report.next_steps,
     },
+    submitted_kernel_evidence: submission.submitted_kernels.map(kernel => kernelEvidenceChain(project, kernel)),
     integration_event_id: integrationEventId,
     integration_event_ref: integrationEventRef,
+  };
+}
+
+function kernelEvidenceChain(project: Project, kernel: KernelSubmission): ResearchCommitReport['submitted_kernel_evidence'][number] {
+  const receiptPath = resolveEvidenceRef(project, kernel.full_size_test_ref);
+  const receipt = readJson<TestReceipt>(receiptPath);
+  const buildReceiptPath = resolveEvidenceRef(project, receipt.build_ref);
+  const build = readJson<BuildReceipt>(buildReceiptPath);
+  return {
+    kernel_id: kernel.kernel_id,
+    revision: kernel.revision,
+    full_size_test_ref: kernel.full_size_test_ref,
+    receipt_path: receiptPath,
+    build_ref: receipt.build_ref,
+    build_receipt_path: buildReceiptPath,
+    module_ref: build.module_ref,
+    module_path: inside(project.root, build.module_ref),
+    source_ref: build.source_ref,
+    source_hash: receipt.source_hash,
+    artifact_hash: receipt.artifact_hash,
   };
 }
 
@@ -254,7 +306,7 @@ function validateSubmission(project: Project, submission: Submission): void {
   }
   validateHypothesis(project, submission, issues);
   if (record?.assigned_hypothesis) validateAssignedHypothesis(project, submission, record.assigned_hypothesis, issues);
-  validateExperiments(submission, issues);
+  validateExperiments(project, submission, issues);
   validateKnowledge(submission, issues);
   if (!Array.isArray(submission.submitted_kernels)) {
     issue(issues, 'submitted_kernels', 'REQUIRED', 'submitted_kernels must be an array, possibly empty');
@@ -379,14 +431,21 @@ function validateHypothesisEvidence(project: Project, submission: Submission, is
 
 function validateProfileEvidence(project: Project, researchId: string, ref: string, receipt: ProfileReceipt, path: string, issues: SubmissionIssue[]): void {
   validateEvidenceOrigin(project, researchId, ref, receipt, path, issues);
-  const caseIds = new Set(project.suite.cases.map(item => item.case_id));
-  if (receipt.instrumented !== true || !Array.isArray(receipt.observations) || receipt.observations.length === 0
-    || receipt.observations.some(row => !row || !caseIds.has(row.case_id) || !row.metric || typeof row.value !== 'number' || !Number.isFinite(row.value) || !row.unit)) {
+  const casesById = new Map(project.suite.cases.map(item => [item.case_id, item]));
+  const validObservation = (row: any) => {
+    const kind = row?.measurement_kind ?? receipt.measurement_kind;
+    return row && casesById.has(row.case_id) && typeof row.value === 'number' && Number.isFinite(row.value) && row.unit === 'us'
+      && ((kind === 'acl_event_interval' && row.metric === 'kernel_time_us')
+        || (kind === 'msprof_task_duration' && row.metric === 'device_task_time_us'));
+  };
+  if (!Array.isArray(receipt.observations) || receipt.observations.length === 0
+    || receipt.observations.some(row => !validObservation(row))) {
     issue(issues, path, 'INVALID_PROFILE', 'profile evidence requires actual observations for known cases');
   }
   // ProfileReceipt has no build_ref, so match its pinned source and revision to
   // a completed build in the same tool-owned experiment directory.
   const builds = join(experimentDir(project, receipt.research_id, receipt.experiment_id), 'builds');
+  let matchingKernelPrefix: string | undefined;
   const hasBuild = listJsonFiles(builds).some(buildRef => {
     const build = readJson<BuildReceipt>(buildRef);
     if (build.status !== 'COMPLETED' || !build.artifact_hash || build.experiment_id !== receipt.experiment_id
@@ -394,18 +453,41 @@ function validateProfileEvidence(project: Project, researchId: string, ref: stri
       || build.kernel_ref?.revision !== receipt.kernel_ref?.revision) return false;
     const buildIssues: SubmissionIssue[] = [];
     validateEvidenceOrigin(project, researchId, buildRef, build, `${path}.build_ref`, buildIssues);
+    let kernelPrefix: string | undefined;
+    try {
+      kernelPrefix = validateBuildStillFresh(project, build).symbol_prefix;
+    } catch (error) {
+      buildIssues.push({ path: `${path}.build_ref`, code: 'STALE_SOURCE', message: (error as Error).message });
+    }
+    if (buildIssues.length === 0) matchingKernelPrefix = kernelPrefix;
     return buildIssues.length === 0;
   });
   if (!hasBuild) issue(issues, `${path}.build_ref`, 'MISSING_BUILD', 'profile evidence requires a matching real build from this research');
+  if (project.config.execution.backend === 'ssh') {
+    if (!Array.isArray(receipt.raw_profiles) || receipt.raw_profiles.length === 0) {
+      issue(issues, `${path}.raw_profiles`, 'MISSING_DEVICE_EXECUTION', 'SSH profile evidence requires raw PASS rows with device execution proof');
+      return;
+    }
+    for (const [index, observation] of (Array.isArray(receipt.observations) ? receipt.observations : []).entries()) {
+      const testCase = casesById.get(observation?.case_id);
+      const raw = receipt.raw_profiles.find(row => row.case_id === observation?.case_id && row.status === 'PASS');
+      if (!testCase || !raw || raw.input_hash !== testCase.input_hash || raw.oracle_hash !== testCase.oracle_hash
+        || !hasDeviceExecution(raw.device_execution, project.config.environment.device_id, matchingKernelPrefix)) {
+        issue(issues, `${path}.observations.${index}.device_execution`, 'MISSING_DEVICE_EXECUTION',
+          'SSH profile observations require matching PASS raw profile rows with target-kernel device execution proof');
+      }
+    }
+  }
 }
 
-function validateExperiments(submission: Submission, issues: SubmissionIssue[]): void {
+function validateExperiments(project: Project, submission: Submission, issues: SubmissionIssue[]): void {
   if (!Array.isArray(submission.experiments) || submission.experiments.length === 0) {
     issue(issues, 'experiments', 'REQUIRED', 'at least one experiment and analysis record is required');
     return;
   }
   submission.experiments.forEach((experiment, index) => {
     requiredString(issues, `experiments.${index}.experiment_id`, experiment.experiment_id);
+    requiredString(issues, `experiments.${index}.hypothesis_revision`, experiment.hypothesis_revision);
     requiredString(issues, `experiments.${index}.question`, experiment.question);
     requiredString(issues, `experiments.${index}.intervention`, experiment.intervention);
     requiredString(issues, `experiments.${index}.analysis`, experiment.analysis);
@@ -414,6 +496,27 @@ function validateExperiments(submission: Submission, issues: SubmissionIssue[]):
     }
     if (!Array.isArray(experiment.full_size_test_refs)) {
       issue(issues, `experiments.${index}.full_size_test_refs`, 'REQUIRED', 'full-size evidence refs must be listed, even if empty');
+    }
+    validateExperimentReceiptRefs(project, experiment.full_size_test_refs, `experiments.${index}.full_size_test_refs`, issues);
+    validateExperimentReceiptRefs(project, experiment.profile_refs, `experiments.${index}.profile_refs`, issues);
+  });
+}
+
+function validateExperimentReceiptRefs(project: Project, refs: unknown, path: string, issues: SubmissionIssue[]): void {
+  if (!Array.isArray(refs)) return;
+  refs.forEach((ref, index) => {
+    const refPath = `${path}.${index}`;
+    if (typeof ref !== 'string' || !ref.trim()) {
+      issue(issues, refPath, 'INVALID_REF', 'experiment evidence refs must be nonempty strings');
+      return;
+    }
+    try {
+      const receipt = readJson<unknown>(resolveEvidenceRef(project, ref));
+      if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+        issue(issues, refPath, 'INVALID_RECEIPT', 'experiment evidence refs must point to receipt objects');
+      }
+    } catch (error) {
+      issue(issues, refPath, 'MISSING_RECEIPT', (error as Error).message);
     }
   });
 }
@@ -425,9 +528,11 @@ function validateKnowledge(submission: Submission, issues: SubmissionIssue[]): v
   }
   submission.knowledge_updates.forEach((claim, index) => {
     requiredString(issues, `knowledge_updates.${index}.claim_id`, claim.claim_id);
+    requiredString(issues, `knowledge_updates.${index}.kind`, claim.kind);
     requiredString(issues, `knowledge_updates.${index}.statement`, claim.statement);
     requiredString(issues, `knowledge_updates.${index}.scope`, claim.scope);
     requiredArray(issues, `knowledge_updates.${index}.evidence_refs`, claim.evidence_refs);
+    requiredList(issues, `knowledge_updates.${index}.related_material_ids`, claim.related_material_ids);
   });
 }
 
@@ -505,6 +610,11 @@ function validateLinkedBuild(project: Project, researchId: string, receipt: Test
   }
   if (build.source_hash !== receipt.source_hash) issue(issues, `${path}.source_hash`, 'SOURCE_MISMATCH', 'build must match the tested source hash');
   if (!build.artifact_hash || build.artifact_hash !== receipt.artifact_hash) issue(issues, `${path}.artifact_hash`, 'ARTIFACT_MISMATCH', 'build must match the tested artifact hash');
+  try {
+    validateBuildStillFresh(project, build);
+  } catch (error) {
+    issue(issues, path, 'STALE_SOURCE', (error as Error).message);
+  }
   return build;
 }
 
@@ -553,6 +663,10 @@ function validateTestEvidence(project: Project, researchId: string, ref: string,
     if (seen.has(row.case_id)) issue(issues, rowPath, 'DUPLICATE_CASE', 'receipt has duplicate case rows');
     seen.add(row.case_id);
     validateMeasurementRow({ ...receipt.kernel_ref, source_hash: receipt.source_hash }, row, testCase, rowPath, issues);
+    if (project.config.execution.backend === 'ssh' && row.status === 'PASS'
+      && !hasDeviceExecution(row.device_execution, project.config.environment.device_id)) {
+      issue(issues, `${rowPath}.device_execution`, 'MISSING_DEVICE_EXECUTION', 'Real PASS requires measured target-kernel device execution evidence; ACL timing alone is insufficient');
+    }
   }
   if (receipt.mode === 'full') for (const testCase of project.suite.cases) {
     if (!seen.has(testCase.case_id)) issue(issues, `${path}.rows.${testCase.case_id}`, 'MISSING_CASE', 'full-size receipt is missing a case');
@@ -602,6 +716,10 @@ function requiredString(issues: SubmissionIssue[], path: string, value: unknown)
 
 function requiredArray(issues: SubmissionIssue[], path: string, value: unknown): void {
   if (!Array.isArray(value) || value.length === 0) issue(issues, path, 'REQUIRED', 'non-empty array is required');
+}
+
+function requiredList(issues: SubmissionIssue[], path: string, value: unknown): void {
+  if (!Array.isArray(value)) issue(issues, path, 'REQUIRED', 'array is required');
 }
 
 function issue(issues: SubmissionIssue[], path: string, code: string, message: string): void {

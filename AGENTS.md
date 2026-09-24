@@ -43,7 +43,7 @@
 - 假设结论、kernel 性能和集成选择独立记录；mock 不得作为真实硬件假设的证明。
 - subagent 对自己提交的每个精确 kernel revision 完成独立全尺寸测试并提交完整逐 case 数据；不得让 chief 补测。
 - 有效最终提交入库后程序自动分桶并生成 version；chief 无须手动集成。准备提交不触发集成。
-- SSH 是可配置 backend；默认 mock。仅通过集中 profile 和系统 SSH 配置引用连接，禁止把密钥复制到仓库、prompt、日志或报告。
+- SSH 是可配置 backend；初始化默认未配置，由 chief 调试真实设备并生成硬件报告后才能开始研究。mock 仅供显式测试/演示。仅通过集中 profile 和系统 SSH 配置引用连接，禁止把密钥复制到仓库、prompt、日志或报告。
 
 ## 协作与验证
 

@@ -1,23 +1,29 @@
 ---
 name: meteor-kernel-test
-description: meteor 研究入口与单 kernel 测试规范。Chief 按用户目标自行初始化、准备材料与假设并启动研究，管理已授权的持续目标；研究 Agent 在同一会话构建并独立全尺寸测试每个提交 revision。
+description: meteor 研究入口与单 kernel 测试。Chief 初始化后调试真实设备、生成硬件报告并启动研究；原研究 Agent 自主构建和全尺寸测试每个交付 revision，核对设备执行与计时范围。
 ---
 
 # 单 kernel 测试
 
 ## Chief：配置并启动研究
 
-用户只需给出研究目标，以下操作由 Chief 自动完成，无须用户在聊天里重复操作步骤。工程尚未初始化时，自行调用 `meteor_init`，再继续配置与启动。读取 `meteor.config.json`、存在时读取 `.meteor.local.json`，并读取 `asc/operator.json`。项目默认 mock 可由 local override 切换为 SSH；以合并后的配置为准。配置齐全且目标足以形成研究任务时，尽快调用 `meteor_start`。只有遇到明确缺项或工具错误，才定位对应配置或实现；不要穷尽旧研究日志、数据库、驱动源码或手工 SSH 探测后才启动。
+用户只需给出研究目标，以下操作由 Chief 自动完成，无须用户在聊天里重复操作步骤。工程尚未初始化时，自行调用 `meteor_init`。读取 `meteor.config.json`、存在时读取 `.meteor.local.json`，并读取 `asc/operator.json`；以合并后的配置为准。初始化不代表设备就绪，不使用默认 mock、示例芯片、假定核数/内存或占位编译目标来启动真实研究。
 
-**已配置工程的首轮动作：读完以上配置，下一次调度就调用 `meteor_start`。** 首轮通过 subagent 的构建/测试调用验证 SSH 执行链。不要把 `ssh -V`、端口探测、读取系统 SSH 文件或驱动源码作为前置任务；原生 shell 的环境也不能代表插件实验工具的执行环境。库为空或旧研究没有有效实验时，照常以默认随机材料启动，让 subagent 提出假设并建立实验基线。用户指定了材料或假设时，直接传入启动参数。首个研究已经运行后，Chief 再整理资料、研究后续假设和安排后续轮次。
+**Chief 的设备准备职责：** 首先调用 `meteor_hardware_probe({})` 自动发现已有集中 profile；初始化返回的 `available_profiles` 是真实可用引用。不要根据示例猜 `default` 等名称，不要在已有配置可读时要求用户重复提供 SSH 配置。只有多个可用连接需要选择时传实际存在的 `profile_ref`；出现 unknown reference 时先按工具返回的列表纠正调用。读取返回的硬件报告、能力与 setup 状态，核对实际 SoC/架构、设备映射、核数/内存、健康、工具链、真实设备 kernel 的编译执行与采集结果。失败时根据具体诊断在已授权范围内调试配置并重新探测；确实没有可用连接配置时才指出所需配置项，保持未就绪，不启动研究。不要把端口可达、ACL 初始化或原生 shell 的环境当作插件执行链已通过。报告中的未知能力保留未知，不根据名称或其他机器参数补值。详细检查方法见 [Ascend 测量参考](references/ascend-measurement.md)。
+
+已有工程也先核对当前 profile/设备/工具链对应的报告；报告缺失、失效或环境变更时重跑探测。设备就绪且目标足以形成任务后尽快 `meteor_start`。设备探测只验证环境能力，不能代替研究 Agent 对自己 kernel 的正确性、执行设备与性能验证。库为空时可用默认随机材料启动，由 subagent 提出假设和基线；用户指定材料或假设时直接传入。无需通读旧日志、数据库或驱动源码才开始研究。
+
+设备准备失败时由 Chief 读取报告中具体失败命令和输出，按官方文档自主定位和修复已授权的本地工具或环境配置，再探测；不要只重复相同请求后把可自行排查的问题交给用户。项目 `tools/meteor/runners` 是实际探测代码来源，修改后会以新内容哈希部署。保留失败报告及其原始证据。区分“未运行采集”“采集失败”“采集成功但未匹配任务”；前置正确性失败而跳过 msprof 时，不能报告成 msprof 已采集却找不到任务。
+
+文件和 shell 工具遵循当前 DSH 权限上下文；普通项目编辑沿用默认权限，不自行添加 `sandbox_permissions` 或申请提权。当 approval policy 为 `never` 时省略这些参数。工具因参数校验失败时，根据错误修正参数再调用，不反复提交同一组被拒参数；检查修改已实际生效后再复测。任务受阻不等于任务完成，最终报告和任务状态应准确保留尚未执行的研究。
 
 Chief 可为本轮目标读取少量相关库证据、内部文件，并通过可用的 web 搜索/读取工具查阅厂商官方资料，提出可证伪假设。已有足够证据形成可执行研究时就启动；后续检索围绕报告中的具体缺口。把来源和适用范围随材料引用交给研究 Agent。
 
 调用 `meteor_start` 时传入 `goal`，可带 `research_id` 和 `budget`。通过 `initial_context` 选择本轮初始材料：省略时默认按原新鲜度策略随机分发；`{mode:'random',sampling:{count,seed,epsilon,lambda,tau_hours}}` 中的抽样参数均可选，仅对本轮生效；`{mode:'specified',kernel_refs:[...],knowledge_refs:[...]}` 按指定引用分发，不混入随机材料。引用支持库材料 ID、`sqlite://kind/id` 或文件/模块路径；使用已存在的材料引用。
 
-有给定待检验命题时，Chief 同时传入 `hypothesis:{statement,...}`，它可与任一初始材料模式组合。可补充 `scope`、`mechanism`、`intervention`、`controls`、`predictions`、`support_criteria`、`refutation_criteria`、`confounders`、`measurement_plan`；子 Agent 补齐实验定义并验证该原始目标。未提供假设时才由子 Agent 提出。指定 kernel/知识只作启发，允许继续阅读其他材料、选择其他实现，不要求修改指定 kernel。manifest.json 和 seed.json 保存 Chief 输入与实际分发，用于核对本轮任务。
+有给定待检验命题时，Chief 同时传入 `hypothesis:{statement,...}`，它可与任一初始材料模式组合。可补充 `scope`、`mechanism`、`intervention`、`controls`、`predictions`、`support_criteria`、`refutation_criteria`、`confounders`、`measurement_plan`；子 Agent 补齐实验定义并验证该原始目标。未提供假设时才由子 Agent 提出。给定假设不能附带必须 SUPPORTED、必须更快或必须交付的结论；已有 verdict 只作历史材料。指定 kernel/知识只作启发，允许继续阅读其他材料、选择其他实现，不要求修改指定 kernel。manifest.json 和 seed.json 保存 Chief 输入与实际分发，用于核对本轮任务。
 
-插件负责创建一个连续 subagent，构建/测试工具负责通过集中 profile 连接 SSH。旧研究已经结束时保留其报告并启动独立研究，不把重查旧日志或 shell 里手工 SSH 探测作为新任务的前置条件。配置缺失时再协助用户补齐明确缺项。
+插件负责创建一个连续 subagent，构建/测试工具负责通过集中 profile 连接 SSH。设备报告有效时，旧研究已经结束便保留其报告并启动独立研究；无需重复无关环境探查。
 
 Chief 启动后使用原生 jobs 的等待/完成通知收取结果，并用宿主可用的持久目标能力记录已授权的总目标、进展和剩余预算。不要用空转命令、高频查询或反复创建目标代替等待。遇到插件故障时保留错误报告，定位具体阻塞，避免把算子研究扩展成基础设施重构。
 
@@ -33,18 +39,30 @@ Chief 负责维护仓库，功能分支使用 `<type>/<kebab>` 命名；`main`/`
 
 研究 Agent 在原 session 内决定调用顺序和实验参数；测试过程不另建 Agent、不触发分桶、不决定假设真假。
 
-先读算子约定、模块接口和测试模板，再按具体缺口查找少量相关 kernel 或官方示例。有了足以执行的假设就保存计划并做第一个实验；不要反复通读宿主、存储和集成源码来推迟实验。后续检索围绕具体编译错误、正确性差异或机制问题展开。长源码分文件或分段写入，保持原会话中的实验计划和记忆。
+先读算子约定、硬件报告、模块接口和测试模板，再按具体缺口查找少量相关 kernel 或官方示例。有了足以执行的假设就保存计划并做第一个实验；按工具 schema 填参数，无需通读提交校验或数据库源码。后续检索围绕具体编译错误、正确性差异或机制问题展开。长源码分文件或分段写入，保持原会话中的实验计划和记忆。
+
+初始库为空时自行构造符合 ABI 的最小设备基线，优先参考官方实现。先实际调用 build，根据编译与正确性结果迭代；计划和文档不能替代实验。每个预测与推荐范围都核对当前 case-suite 的真实 shape，超出 suite 的尺寸只能列为后续待验证范围。预算未耗尽且仍有可行实验时继续本轮，不能仅以“尚未实现”“时间有限”交回空结果；外部阻塞应有具体失败证据。
 
 1. 核对 chief 的启动输入、原假设和实验计划，固定 research_id、experiment_id、kernel revision、case_suite、oracle、环境与测量协议。补齐给定假设的实验定义；实质修订时保留原文、原因和原假设状态，不以修订成立替代原目标的验证。
-2. 保存模块 kernel.json/device.asc/host.asc。一个模块只实现一个明确的算法，不把其它独立实现隐藏在 fallback 中。源码或依赖变化时创建新 revision。
-3. 调用 `meteor_kernel_build`，输入 experiment_id、kernel_path；research_id 由宿主绑定当前 session。检查 source_hash、artifact_hash、模块身份、simulated 标记与构建状态。
+2. 保存模块 kernel.json/device.asc/host.asc。目标计算在 AI Core/Vector 上实现，Host 负责调度与输入准备；禁止 CPU/NEON 替算、占位 device kernel 和跨实现 fallback。源码或依赖变化时创建新 revision。
+3. 调用 `meteor_kernel_build`，输入 experiment_id、kernel_path；kernel_path 可指模块目录或 kernel.json，research_id 由宿主绑定当前 session。检查 source_hash、artifact_hash、模块身份、硬件/编译目标、simulated 标记与构建状态。
 4. 可调用 `meteor_kernel_test` 的 probe 模式调试选定 case。probe 不替代 full。
 5. 调用 full 模式独立执行这个 revision 的 case 全集。检查每个 case 的 PASS/INCORRECT/UNSUPPORTED/RESOURCE_REJECTED/RUN_FAILED/TIMEOUT/NOT_RUN、原因、实际实现身份、原始样本和 input/oracle hash。
-6. UNSUPPORTED 是显式终态，不运行其它 kernel 代替。正确性通过且有效执行才能记录计时。accounting_complete 与支持/计时 case 数量分别核对。
+6. UNSUPPORTED 是显式终态，不运行其它 kernel 代替。正确性通过且有效执行才能记录计时。accounting_complete 与支持/计时 case 数量分别核对。“全尺寸”是固定 suite 全集；它不覆盖未列出的 shape，不能将几个离散 case 写成其整个包围区间已验证。
 7. 源码/ELF、环境、suite、协议与提交必须一致。只能引用当前研究、同一 subagent 会话中身份匹配的历史 full 数据；计时可比性或配对要求不足时重新测量。
 8. 失败结果保留为实验材料；编译/测量失败不等于假设被证伪。你可以分析、修复或新增实验。
-9. 最终交付的每个 kernel 都由编写者在提交前测完并提交完整数据，不能把责任移交 chief。准备交付失败时回到本 skill 补齐。
+9. 最终交付的每个 kernel 都由编写者在提交前测完并提交完整数据，不能把责任移交 chief。准备交付失败时回到本 skill 补齐。`meteor_prepare_submission` 使用完整工具 schema，研究身份自动绑定；实验要关联 hypothesis revision。最终报告使用准备结果返回的被测模块、完整测量与报告引用，不根据目录名称重建链接。
+
+## 设备执行与计时检查
+
+- 每个被测实现都要有与其 source/build、case 和目标设备对应的执行证据。SSH 成功、simulated:false、ACL event 有数值不足以证明 AI Core 执行。采集器需找到目标 kernel 的真实 AI Core/Vector/MIX 任务；任意无关设备任务、AI_CPU 或纯搬运不能代替它。
+- 检查 Host/Device 实际路径：输入回 Host 计算、占位 kernel、编译为 CPU 调试模式都不符合目标。仅有 profiler 行也不能替 CPU 计算背书；结合源码/launch、正确性与工具证据判断。
+- kernel 延迟区间应在预热与 H2D 完成之后开始，涵盖目标设备 launch，结束后同步，再做 D2H/正确性校验。Host 计算、额外拷贝、分配或编译若被计入，应明确标成相应端到端时间，不作为 kernel 延迟。
+- ACL event 在同一 stream 上记录 start/end，同步完成后读取 `aclrtEventElapsedTime`；单位 ms，转 us 乘 1000。保留 warmup、repeat、每次原始样本、同步点和计时范围；不把平均值当原始样本。
+- 常态计时与插桩/profile 分开。profiling 开销、缓存状态、频率、其他并行任务可能改变结果；需要时采用配对复测。设备级 profiling 按工具队列串行，不另开采集进程竞争设备。
+
+具体命令、字段、版本差异和官方链接见 [Ascend 测量参考](references/ascend-measurement.md)。仅在相应问题出现时查阅对应小节。
 
 测试回执通过原调用返回当前 session。可用 run_status/run_control 查询或取消已提交请求；取消或远端状态未知时保持准确状态，禁止重复提交未知的同一远端任务。
 
-mock 数据只用来验证协议；禁止报告为真实 Ascend 性能。真实后端只引用集中 SSH profile，不读取或复制凭据。
+显式的协议测试可使用 mock，但不得替代初始化设备准备或真实性能证据。真实后端只引用集中 SSH profile，不读取或复制凭据。工具缺陷保留输入与错误给 Chief；不要修改测试器、冻结快照、原始回执或 importer 来迁就当前交付。

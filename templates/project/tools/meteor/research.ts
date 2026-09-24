@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { AssignedHypothesis, Project, ResearchRecord } from './contracts.ts';
 import { assert, hashObject, readJson, safeId, writeImmutable, writeJson } from './util.ts';
 import { normalizeInitialContext } from './sampling.ts';
+import { assertHardwareReady } from './hardware.ts';
 
 export function researchPath(project: Project, id: string) { return join(project.dataRoot, 'research', safeId(id)); }
 export function getResearch(project: Project, id: string): ResearchRecord {
@@ -14,6 +15,7 @@ export function createResearch(project: Project, input: {
   budget?: Partial<ResearchRecord['budget']>;
   initial_context?: unknown; assigned_hypothesis?: unknown;
 }): ResearchRecord {
+  assertHardwareReady(project);
   assert(input.goal?.trim(), 'Research goal is required');
   const id = input.research_id ?? 'research-' + randomUUID();
   const dir = researchPath(project, id);

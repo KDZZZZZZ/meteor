@@ -37,6 +37,12 @@ process.stdin.on('end', () => {
     console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:req.artifact_hash,rendered_source_hash:req.rendered_source_hash,rows:[{case_id:'c1',status:'PASS',samples_us:[1,2,3,4,5]}]}}));
     return;
   }
+  if (${JSON.stringify(mode)} === 'pass-no-device' || ${JSON.stringify(mode)} === 'pass-device') {
+    const proof = ${JSON.stringify(mode)} === 'pass-device' ? {status:'CONFIRMED',matched_tasks:[{device_id:0,op_name:'demo_device',task_type:'AI_CORE'}]} : undefined;
+    console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:req.artifact_hash,rendered_source_hash:req.rendered_source_hash,
+      rows:req.cases.map(c=>({case_id:c.case_id,status:'PASS',input_hash:c.input_hash,oracle_hash:c.oracle_hash,samples_us:[1,2,3,4,5],device_execution:proof}))}}));
+    return;
+  }
   console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:'b'.repeat(64),remote_build_id:req.build_id,rendered_source_hash:req.rendered_source_hash}}));
 });
 `, 'utf8');
@@ -237,4 +243,16 @@ test('SshRunner rejects PASS rows without confirmed remote input and oracle hash
     mode: 'probe',
     case_ids: ['c1'],
   }), /Remote PASS input hash mismatch/);
+}));
+
+test('SSH timings and correct hashes alone do not prove device execution', withFakeSsh('pass-no-device', async root => {
+  await assert.rejects(() => new SshRunner().test({ project: projectWithCase(root), build: completedBuild(root),
+    module: { ...module(), supported_case_ids: ['c1'] }, mode: 'full' }), /device execution evidence/);
+}));
+
+test('SSH preserves candidate execution evidence and sends candidate identity', withFakeSsh('pass-device', async (root, logPath) => {
+  const receipt = await new SshRunner().test({ project: projectWithCase(root), build: completedBuild(root),
+    module: { ...module(), supported_case_ids: ['c1'] }, mode: 'full' });
+  assert.equal(receipt.rows[0].device_execution?.status, 'CONFIRMED');
+  assert.equal(JSON.parse(readFileSync(logPath, 'utf8').trim()).kernel_name, 'demo_');
 }));

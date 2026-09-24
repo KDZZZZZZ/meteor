@@ -124,6 +124,14 @@ export class MeteorHost {
     return resolve(cwd);
   }
   async init(exec: ToolExecution): Promise<any> { return initProject(this.root(this.chief(exec))); }
+  async hardware(args: any, exec: ToolExecution): Promise<any> {
+    const { probeHardware } = await import('./hardware.ts');
+    const root = this.root(this.chief(exec));
+    if ([...this.active.values()].some(state => state.project.root === root && !state.finalAccepted && !state.controller.signal.aborted)) {
+      throw new Error('Finish or cancel active research before rebinding its project hardware');
+    }
+    return probeHardware(root, args.profile_ref, exec.signal);
+  }
 
   async start(input: unknown, exec: ToolExecution): Promise<any> {
     const args = object(input);
@@ -213,7 +221,8 @@ export class MeteorHost {
         case_suite: state.project.suite, seed_ref: existsSync(seedPath) ? seedPath : null,
         skills: ['meteor-kernel-test', 'meteor-performance-analysis'],
         material_policy: 'Seeds are inspiration only. Read other kernels, knowledge, and any accessible files; no inheritance is required.',
-        hypothesis_policy: 'If assigned_hypothesis is present, test that proposition and preserve its supplied fields and verdict when refining it. Fill missing experimental details yourself. A supported revision does not settle an inconclusive original. Otherwise propose your own hypothesis.',
+        hardware_report_ref: state.project.config.environment.hardware_report_ref,
+        hypothesis_policy: 'If assigned_hypothesis is present, test the original proposition and fill missing experimental details. Treat verdicts quoted in goals, old reports or seeds as prior claims to examine, never predetermined outcomes. Reassess support/refutation using relevant controls and mechanism evidence; faster or slower kernels alone do not establish the hypothesis. A supported revision does not settle an inconclusive original. Otherwise propose your own hypothesis.',
         completion: 'Use meteor_prepare_submission, then native structured_output with its prepared_submission_id. Keep one continuous session.',
       });
       const allow = [...RESEARCH_TOOLS, ...READ_TOOLS.filter(name => this.ctx.tools.get(name, state.chief))];

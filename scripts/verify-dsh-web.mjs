@@ -60,7 +60,16 @@ try {
   const parentSkills = join(scratch, '.dsh/skills/meteor-kernel-test');
   mkdirSync(parentSkills, { recursive: true });
   writeFileSync(join(parentSkills, 'SKILL.md'), '---\nname: meteor-kernel-test\ndescription: Parent project skill\n---\nPARENT_SKILL_ONLY\n');
-  await call('meteor_init', {});
+  const initialized = await call('meteor_init', {});
+  assert.equal(initialized.state, 'setup_required');
+  assert(tools.schemas(chief).some(tool => tool.name === 'meteor_hardware_probe'));
+  // This native composition check deliberately uses explicit simulated fixtures.
+  const configPath = join(project, 'meteor.config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  config.execution = { backend: 'mock', profile_ref: 'mock-qmq-v1' };
+  config.environment = { environment_ref: 'mock-ascend-qmq-v1', hardware: 'simulated-ascend',
+    toolchain: 'mock-no-compiler', measurement_protocol_ref: 'mock-median-5-v1', simulated: true };
+  writeFileSync(configPath, JSON.stringify(config));
   const chiefSkill = await chiefSkills.get('meteor-kernel-test', skillOptions);
   assert.equal(chiefSkill?.path, join(project, '.dsh/skills/meteor-kernel-test/SKILL.md'));
   assert(chiefSkill.content.includes('initial_context'), 'Chief must discover the nested project skill after initialization');

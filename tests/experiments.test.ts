@@ -131,7 +131,17 @@ test('stale build_ref is rejected after kernel source changes', async () => {
   write(join(project.root, 'kernels/demo/r1/host.asc'), 'MeteorStatus demo_launch(const MeteorCall&, const MeteorShape&, const MeteorResources&) { return MeteorStatus::Unsupported; }\n');
 
   await assert.rejects(() => testKernel(project, { build_ref: buildRef, mode: 'full' }), /Stale build_ref/);
-  await assert.rejects(() => buildKernel(project, { research_id: 'rB', experiment_id: 'e2', kernel_path: 'kernels/demo/r1' }), /Immutable record conflict/);
+  await assert.rejects(() => buildKernel(project, { research_id: 'rB', experiment_id: 'e2', kernel_path: 'kernels/demo/r1' }), /assign a new revision/);
+});
+
+test('kernel.json path and module directory produce the same immutable build identity', async () => {
+  const project = makeProject();
+  activate(project, 'rPath');
+  const input = { research_id: 'rPath', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
+  const directory = await buildKernel(project, input);
+  const file = await buildKernel(project, { ...input, kernel_path: input.kernel_path + '/kernel.json' });
+  assert.deepEqual(file, directory);
+  assert.equal(file.module_ref, 'kernels/demo/r1/kernel.json');
 });
 
 test('failed mock build records NOT_RUN test rows instead of passing', async () => {
@@ -238,20 +248,10 @@ test('mock backend does not write ssh evidence or fabricate real execution', asy
   assert.equal(slash(project.dataRoot).endsWith('reports/meteor/mock'), true);
 });
 
-test('ssh backend reports configuration gap without simulated data', async () => {
+test('ssh backend rejects research before execution when device setup is missing', () => {
   const project = makeProject('ssh');
-  activate(project, 'rF');
-  const build = await buildKernel(project, { research_id: 'rF', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
-  const buildRef = slash(relative(project.root, join(project.dataRoot, 'research/rF/experiments/e1/builds', `${build.build_id}.json`)));
-  const receipt = await testKernel(project, { build_ref: buildRef, mode: 'full' });
-
-  assert.equal(build.execution_backend, 'ssh');
-  assert.equal(build.simulated, false);
-  assert.equal(build.status, 'FAILED');
-  assert.equal(receipt.status, 'FAILED');
-  assert.equal(receipt.simulated, false);
-  assert.equal(receipt.rows.every(row => row.status === 'NOT_RUN'), true);
-  await assert.rejects(() => profileKernel(project, { build_ref: buildRef, case_ids: ['c1'], metrics: ['l2_transactions'] }), /not configured|not implemented|real completed build/);
+  assert.throws(() => activate(project, 'rF'), /Device setup required/);
+  assert.equal(project.config.environment.simulated, false);
 });
 
 test('abort signal is observed before mock build starts', async () => {

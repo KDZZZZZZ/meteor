@@ -16,7 +16,7 @@ function deferred<T = any>() {
 }
 function harness() {
   const root = mkdtempSync(join(tmpdir(), 'meteor-dsh-'));
-  initProject(root, { git: false });
+  initProject(root, { git: false, backend: 'mock' });
   const tools = new Map<string, any>();
   tools.set('skill', { name: 'skill' }); tools.set('read', { name: 'read' });
   tools.set('subagent', { name: 'subagent' }); tools.set('bash', { name: 'bash' });
@@ -76,7 +76,9 @@ function submission(researchId: string, sessionId: string) {
 
 test('one native run keeps research tools and skills in one session, and commits only its prepared final output', async () => {
   const h = harness();
-  const started = await h.call('meteor_start', { research_id: 'continuous', goal: 'Investigate tiling' });
+  await assert.rejects(h.call('meteor_start', { goal: 'Investigate tiling', budget: { experiments: 3 } }), /budget\.experiments is not supported/);
+  assert.equal(h.host.active.size, 0);
+  const started = await h.call('meteor_start', { research_id: 'continuous', goal: 'Investigate tiling', initial_context: { mode: 'random', kernel_refs: [], knowledge_refs: [] } });
   const { child, registeredSkills } = await h.childReady.promise;
   assert.equal(h.starts.length, 1);
   assert.equal(registeredSkills.length, 2);
@@ -89,10 +91,17 @@ test('one native run keeps research tools and skills in one session, and commits
   writeFileSync(outside, 'another research kernel');
   assert.equal((await h.call('meteor_read_file', { path: outside }, child)).text, 'another research kernel');
   for (const round of [1, 2]) await h.call('meteor_write_file', { path: 'memory.md', content: `Round ${round}: original hypothesis still unresolved` }, child);
-  const rejected = await h.call('meteor_prepare_submission', { submission: { ...submission('continuous', child.id), experiments: [] } }, child);
-  assert.equal(rejected.prepared, false);
+  await assert.rejects(
+    h.call('meteor_prepare_submission', { submission: { ...submission('continuous', child.id), experiments: [] } }, child),
+    /submission\.experiments requires at least 1 items/,
+  );
   assert.equal(h.host.active.size, 1);
-  const prepared = await h.call('meteor_prepare_submission', { submission: submission('continuous', child.id) }, child);
+  assert.equal((await h.call('meteor_status', { research_id: 'continuous' })).run_status, 'ACTIVE');
+  const autoBoundSubmission: any = submission('wrong-research', 'wrong-session');
+  delete autoBoundSubmission.research_id;
+  delete autoBoundSubmission.agent_session_id;
+  delete autoBoundSubmission.execution_backend;
+  const prepared = await h.call('meteor_prepare_submission', { submission: autoBoundSubmission }, child);
   assert.equal(prepared.committed, false);
   const before = await h.call('meteor_status', { research_id: 'continuous' });
   assert.equal(before.run_status, 'OUTPUT_FROZEN');
@@ -313,7 +322,7 @@ test('installed DSH alpha.2 ToolRuntime accepts and executes meteor tool definit
   for (const service of ['jobs', 'subagents']) ctx.provide(service, {});
   ctx.provide('skills', { registerProvider() { return () => {}; } });
   const plugin = await ctx.plugin(meteor);
-  assert.equal(ctx.tools.schemas().filter((tool: any) => tool.name.startsWith('meteor_')).length, 13);
+  assert.equal(ctx.tools.schemas().filter((tool: any) => tool.name.startsWith('meteor_')).length, 14);
   const failed = await ctx.tools.execute({ name: 'meteor_start', arguments: { goal: 'must require chief' }, callId: 'meteor-smoke', signal: new AbortController().signal });
   assert.equal(failed.isError, true);
   assert.match(failed.content[0].text, /chief/);

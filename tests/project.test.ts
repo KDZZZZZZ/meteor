@@ -9,10 +9,11 @@ import { bindResearchSession, createResearch, getResearch, updateResearch, asser
 import { loadSshProfile } from '../templates/project/tools/meteor/profiles.ts';
 import { writeJson } from '../templates/project/tools/meteor/util.ts';
 
-test('init is idempotent, preserves human changes, and starts in mock', () => {
+test('init is idempotent, preserves human changes, and starts unconfigured by default', () => {
   const root = mkdtempSync(join(tmpdir(), 'meteor-init-'));
   const first = initProject(root, { git: false });
-  assert.equal(first.state, 'ready_mock');
+  assert.equal(first.state, 'setup_required');
+  assert.equal(first.execution_backend, 'unconfigured');
   assert(first.created.includes('meteor.config.json'));
   const second = initProject(root, { git: false });
   assert.equal(second.created.length, 0);
@@ -21,13 +22,13 @@ test('init is idempotent, preserves human changes, and starts in mock', () => {
   const third = initProject(root, { git: false });
   assert(third.conflicts.some(path => path.replaceAll('\\','/') === 'prompts/meteor.md'));
   assert.equal(readFileSync(join(root, 'prompts/meteor.md'), 'utf8'), 'human customization');
-  assert.equal(loadProject(root).config.execution.backend, 'mock');
+  assert.equal(loadProject(root).config.execution.backend, 'unconfigured');
   assert(!existsSync(join(root, '.git')));
 });
 
 test('one research preserves its session and pinned snapshot', () => {
   const root = mkdtempSync(join(tmpdir(), 'meteor-session-'));
-  initProject(root, { git: false });
+  initProject(root, { git: false, backend: 'mock' });
   const project = loadProject(root);
   const record = createResearch(project, { chief_id: 'chief', agent_session_id: 'pending', goal: 'Test a defined prediction' });
   bindResearchSession(project, record.research_id, 'original-session');
@@ -45,7 +46,7 @@ test('one research preserves its session and pinned snapshot', () => {
 
 test('chief assignments are copied and cannot be changed after research creation', () => {
   const root = mkdtempSync(join(tmpdir(), 'meteor-assignment-'));
-  initProject(root, { git: false });
+  initProject(root, { git: false, backend: 'mock' });
   const project = loadProject(root);
   const hypothesis = { statement: 'Reuse reduces transfers', predictions: ['Fewer repeated transfers'] };
   const initialContext = { mode: 'specified', knowledge_refs: ['knowledge/notes.md'] };
@@ -74,7 +75,7 @@ test('central SSH profiles permit aliases, reject embedded credentials, and neve
 
 test('local override cannot silently mix real and simulated environments', () => {
   const root = mkdtempSync(join(tmpdir(), 'meteor-config-'));
-  initProject(root, { git: false });
+  initProject(root, { git: false, backend: 'mock' });
   writeJson(join(root, '.meteor.local.json'), { execution: { backend: 'ssh', profile_ref: 'dev' } });
   assert.throws(() => loadProject(root), /simulation flag/);
   writeJson(join(root, '.meteor.local.json'), { password: 'not-a-real-secret' });

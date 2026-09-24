@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
-const python = process.env.PYTHON ?? 'python';
+const configuredPython = process.env.PYTHON ?? 'python';
+const resolvedPython = spawnSync(configuredPython, ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).stdout.trim();
+const python = resolvedPython || configuredPython;
 const driver = join(process.cwd(), 'templates/project/tools/meteor/runners/remote/driver.py');
 
 function sha256(data: Buffer | string): string {
@@ -140,6 +142,7 @@ test('remote driver build/test is durable and idempotent with fake executable ha
   assert.equal(tested.parsed.result.artifact_hash, built.parsed.result.artifact_hash);
   assert.equal(tested.parsed.result.rows.length, 2);
   assert.equal(tested.parsed.result.rows[0].status, 'PASS');
+  assert.equal(tested.parsed.result.rows[0].device_execution.status, 'SIMULATED');
   assert.equal(tested.parsed.result.rows[0].samples_us.length, 5);
   assert.equal(tested.parsed.result.rows[0].median_us, 12);
   assert.equal(tested.parsed.result.rows[1].status, 'UNSUPPORTED');
@@ -162,8 +165,10 @@ test('remote driver build/test is durable and idempotent with fake executable ha
   assert.equal(profiled.proc.status, 0, profiled.proc.stderr);
   assert.equal(profiled.parsed.result.status, 'COMPLETED');
   assert.equal(profiled.parsed.result.simulated, true);
-  assert.equal(profiled.parsed.result.instrumented, true);
-  assert.deepEqual(profiled.parsed.result.observations, [{ case_id: 'case1', metric: 'kernel_time_us', value: 12, unit: 'us' }]);
+  assert.equal(profiled.parsed.result.instrumented, false);
+  assert.equal(profiled.parsed.result.measurement_kind, 'acl_event_interval');
+  assert.deepEqual(profiled.parsed.result.supported_metrics, ['kernel_time_us', 'device_task_time_us']);
+  assert.deepEqual(profiled.parsed.result.observations, [{ case_id: 'case1', metric: 'kernel_time_us', value: 12, unit: 'us', measurement_kind: 'acl_event_interval' }]);
   assert.equal(profiled.parsed.result.raw_profiles[0].samples_us.length, 5);
 });
 
@@ -233,4 +238,180 @@ test('remote driver profile fails explicitly instead of fabricating counters', (
   assert.equal(profiled.parsed.result.status, 'FAILED');
   assert.match(profiled.parsed.result.reason, /unsupported/);
   assert.deepEqual(profiled.parsed.result.unsupported_metrics, ['aic_cycles']);
+  assert.deepEqual(profiled.parsed.result.allowed_metrics, ['kernel_time_us', 'device_task_time_us']);
+});
+
+test('remote driver requires explicit verified hardware parameters outside fake harness', () => {
+  const remoteRoot = mkdtempSync(join(tmpdir(), 'meteor-remote-real-required-'));
+  const source = '// rendered kernel source\n';
+  const missingArch = runDriver({
+    action: 'build',
+    request_id: 'req-build',
+    remote_root: remoteRoot,
+    source_base64: b64(source),
+    rendered_source_hash: sha256(source),
+    build_id: 'build-1',
+  }, { METEOR_REMOTE_DRIVER_FAKE_BUILD: '' });
+  assert.equal(missingArch.proc.status, 1);
+  assert.match(missingArch.parsed.error, /npu_arch/);
+
+  const missingDevice = runDriver({
+    action: 'test',
+    request_id: 'req-test',
+    remote_root: remoteRoot,
+    build_id: 'build-1',
+  }, { METEOR_REMOTE_DRIVER_FAKE_BUILD: '' });
+  assert.equal(missingDevice.proc.status, 1);
+  assert.match(missingDevice.parsed.error, /device_id/);
+});
+
+
+test('remote driver confirms device execution from msprof op_summary matched_tasks', async t => {
+  const numpyCheck = spawnSync(python, ['-c', 'import numpy'], { encoding: 'utf8' });
+  if (numpyCheck.status !== 0) {
+    t.skip('python numpy is required by bundled verify_case.py');
+    return;
+  }
+  const remoteRoot = mkdtempSync(join(tmpdir(), 'meteor-remote-msprof-'));
+  const buildDir = join(remoteRoot, 'builds', 'build-real');
+  mkdirSync(buildDir, { recursive: true });
+  const executable = join(buildDir, 'qmq_remote_main.py');
+  const script = [
+    '#!/usr/bin/env python3',
+    'from pathlib import Path',
+    'import shutil, sys',
+    "Path('output').mkdir(exist_ok=True)",
+    "shutil.copyfile('golden/y.bin','output/y.bin')",
+    "shutil.copyfile('golden/yScale.bin','output/yScale.bin')",
+    'reps=int(sys.argv[6]) if len(sys.argv)>6 else 5',
+    "for i in range(reps): print(f'QMQ_TIMING_US sample={i} value={10.0+i:.3f}')",
+    '',
+  ].join('\n');
+  writeFileSync(executable, script);
+  chmodSync(executable, 0o755);
+  const metadata = {
+    status: 'COMPLETED',
+    backend: 'ssh',
+    simulated: false,
+    remote_build_id: 'build-real',
+    rendered_source_hash: sha256('kernel'),
+    artifact_hash: '',
+    executable,
+    npu_arch: 'dav-test',
+  };
+  metadata.artifact_hash = hashObject({
+    kernel: metadata.rendered_source_hash,
+    executable: sha256(readFileSync(executable)),
+    npu_arch: metadata.npu_arch,
+  });
+  writeFileSync(join(buildDir, 'build-result.json'), JSON.stringify(metadata));
+
+  const fakeBin = join(remoteRoot, 'fake-bin');
+  mkdirSync(fakeBin, { recursive: true });
+  const fakeMsprof = join(fakeBin, process.platform === 'win32' ? 'msprof.cmd' : 'msprof');
+  const fakeMsprofScript = join(fakeBin, 'msprof_fixture.py');
+  writeFileSync(fakeMsprofScript, [
+    'from pathlib import Path',
+    'import sys',
+    'args = sys.argv[1:]',
+    'if any(arg in args for arg in ["--application", "--force=true", "--output"]): sys.exit(7)',
+    'out = Path(next(arg.split("=", 1)[1] for arg in args if arg.startswith("--output="))) / "nested"',
+    'out.mkdir(parents=True, exist_ok=True)',
+    '(out / "op_summary.csv").write_text(',
+    '  "device_id,task_id,stream_id,op_name,op_type,task_type,task_start_time_us,task_duration_us,block_dim\\n"',
+    '  "0,7,3,meteor_candidate_kernel,Kernel,AI_CORE,100,42.5,8\\n"',
+    '  ",8,3,meteor_candidate_kernel,Kernel,AI_CORE,101,99.5,8\\n"',
+    '  "0,9,3,meteor_candidate_kernel,Kernel,AI_CORE_UNKNOWN,102,99.5,8\\n", encoding="utf-8")',
+  ].join('\n'));
+  const fakeMsprofBody = process.platform === 'win32'
+    ? '@echo off\r\n"' + python + '" "' + fakeMsprofScript + '" %*\r\n'
+    : '#!/bin/sh\nexec "' + python + '" "' + fakeMsprofScript + '" "$@"\n';
+  writeFileSync(fakeMsprof, fakeMsprofBody);
+  chmodSync(fakeMsprof, 0o755);
+
+  const tested = runDriver({
+    action: 'profile',
+    request_id: 'req-profile-device-task',
+    remote_root: remoteRoot,
+    build_id: 'build-real',
+    device_id: 0,
+    cases: [makeCase()],
+    supported_case_ids: ['case1'],
+    artifact_hash: metadata.artifact_hash,
+    repetitions: 5,
+    warmup: 3,
+    metrics: ['kernel_time_us', 'device_task_time_us'],
+    kernel_name: 'meteor_candidate_kernel',
+  }, { METEOR_REMOTE_DRIVER_FAKE_BUILD: '', PATH: fakeBin });
+  assert.equal(tested.proc.status, 0, tested.proc.stderr);
+  assert.equal(tested.parsed.result.status, 'COMPLETED');
+  assert.equal(tested.parsed.result.raw_profiles[0].status, 'PASS');
+  assert.equal(tested.parsed.result.raw_profiles[0].device_execution.status, 'CONFIRMED');
+  assert.equal(tested.parsed.result.raw_profiles[0].device_execution.source, 'profile_dir');
+  assert.equal(tested.parsed.result.raw_profiles[0].device_execution.matched_task_count, 1);
+  assert.equal(tested.parsed.result.raw_profiles[0].device_execution.matched_tasks.length, 1);
+  assert.equal(tested.parsed.result.raw_profiles[0].device_execution.matched_tasks[0].device_id, 0);
+  assert.equal(tested.parsed.result.raw_profiles[0].device_execution.matched_tasks[0].kernel_name, 'meteor_candidate_kernel');
+  assert.equal(tested.parsed.result.raw_profiles[0].device_execution.matched_tasks[0].task_type, 'AI_CORE');
+  assert.deepEqual(tested.parsed.result.observations.map((item: any) => item.metric), ['kernel_time_us', 'device_task_time_us']);
+  assert.equal(tested.parsed.result.observations[1].value, 42.5);
+});
+
+test('remote driver refuses PASS without a device execution witness', async t => {
+  const numpyCheck = spawnSync(python, ['-c', 'import numpy'], { encoding: 'utf8' });
+  if (numpyCheck.status !== 0) {
+    t.skip('python numpy is required by bundled verify_case.py');
+    return;
+  }
+  const remoteRoot = mkdtempSync(join(tmpdir(), 'meteor-remote-witness-'));
+  const buildDir = join(remoteRoot, 'builds', 'build-real');
+  mkdirSync(buildDir, { recursive: true });
+  const executable = join(buildDir, 'qmq_remote_main.py');
+  const script = [
+    '#!/usr/bin/env python3',
+    'from pathlib import Path',
+    'import shutil, sys',
+    "Path('output').mkdir(exist_ok=True)",
+    "shutil.copyfile('golden/y.bin','output/y.bin')",
+    "shutil.copyfile('golden/yScale.bin','output/yScale.bin')",
+    'reps=int(sys.argv[6]) if len(sys.argv)>6 else 5',
+    "for i in range(reps): print(f'QMQ_TIMING_US sample={i} value={10.0+i:.3f}')",
+    '',
+  ].join('\n');
+  writeFileSync(executable, script);
+  chmodSync(executable, 0o755);
+  const metadata = {
+    status: 'COMPLETED',
+    backend: 'ssh',
+    simulated: false,
+    remote_build_id: 'build-real',
+    rendered_source_hash: sha256('kernel'),
+    artifact_hash: '',
+    executable,
+    npu_arch: 'dav-test',
+  };
+  metadata.artifact_hash = hashObject({
+    kernel: metadata.rendered_source_hash,
+    executable: sha256(readFileSync(executable)),
+    npu_arch: metadata.npu_arch,
+  });
+  writeFileSync(join(buildDir, 'build-result.json'), JSON.stringify(metadata));
+
+  const tested = runDriver({
+    action: 'test',
+    request_id: 'req-test',
+    remote_root: remoteRoot,
+    build_id: 'build-real',
+    device_id: 0,
+    cases: [makeCase()],
+    supported_case_ids: ['case1'],
+    artifact_hash: metadata.artifact_hash,
+    repetitions: 5,
+    warmup: 3,
+  }, { METEOR_REMOTE_DRIVER_FAKE_BUILD: '', PATH: '' });
+  assert.equal(tested.proc.status, 0, tested.proc.stderr);
+  assert.equal(tested.parsed.result.rows[0].status, 'RUN_FAILED');
+  assert.equal(tested.parsed.result.rows[0].reason, 'device execution witness missing');
+  assert.equal(tested.parsed.result.rows[0].device_execution.tool, 'msprof');
+  assert.match(tested.parsed.result.rows[0].device_execution.reason, /kernel_name/);
 });

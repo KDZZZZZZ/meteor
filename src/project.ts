@@ -15,10 +15,10 @@ export function loadProject(root: string): Project {
     if (local.environment) config.environment = { ...config.environment, ...local.environment };
   }
   assert(config.schema_version === 1, 'Unsupported meteor config schema');
-  assert(['mock', 'ssh'].includes(config.execution?.backend), 'execution.backend must be mock or ssh');
-  assert(typeof config.execution.profile_ref === 'string' && config.execution.profile_ref.length > 0, 'A profile_ref is required');
+  assert(['unconfigured', 'mock', 'ssh'].includes(config.execution?.backend), 'execution.backend must be unconfigured, mock or ssh');
+  assert(typeof config.execution.profile_ref === 'string' && (config.execution.backend === 'unconfigured' || config.execution.profile_ref.length > 0), 'A profile_ref is required');
   assert(config.environment?.simulated === (config.execution.backend === 'mock'), 'Environment simulation flag must match execution backend');
-  assert(config.environment.environment_ref && config.environment.measurement_protocol_ref, 'Environment identity and measurement protocol are required');
+  if (config.execution.backend !== 'unconfigured') assert(config.environment.environment_ref && config.environment.measurement_protocol_ref, 'Environment identity and measurement protocol are required');
   assert(Number.isInteger(config.budget?.max_experiments) && config.budget.max_experiments > 0, 'Positive experiment budget required');
   assert(Number.isFinite(config.budget.max_wall_time_seconds) && config.budget.max_wall_time_seconds > 0, 'Positive time budget required');
   const sampling = config.sampling;

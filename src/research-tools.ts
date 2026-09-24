@@ -3,6 +3,7 @@ import { dirname, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { MeteorHost, object, text } from './host.ts';
 import type { ActiveResearch, DshContext, ToolExecution } from './host.ts';
+import { submissionSchema } from './submission-schema.ts';
 
 export const string = { type: 'string', minLength: 1 };
 export const strings = { type: 'array', items: string };
@@ -35,9 +36,19 @@ function validate(value: any, schema: any, path: string): void {
     if (!Number.isSafeInteger(value) || (schema.minimum !== undefined && value < schema.minimum) || (schema.maximum !== undefined && value > schema.maximum)) throw new Error(`${path} is outside its integer bounds`);
   } else if (schema.type === 'object') {
     object(value);
+    for (const key of schema.required ?? []) if (!(key in value)) throw new Error(`${path}.${key} is required`);
+    for (const [key, child] of Object.entries(value)) {
+      if (schema.properties?.[key]) validate(child, schema.properties[key], `${path}.${key}`);
+      else if (schema.additionalProperties === false) throw new Error(`${path}.${key} is not supported`);
+    }
   } else if (schema.type === 'array') {
     if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
+    if (schema.minItems !== undefined && value.length < schema.minItems) throw new Error(`${path} requires at least ${schema.minItems} items`);
     value.forEach((item, index) => validate(item, schema.items, `${path}[${index}]`));
+  } else if (schema.type === 'number') {
+    if (typeof value !== 'number' || !Number.isFinite(value)
+      || (schema.minimum !== undefined && value < schema.minimum) || (schema.maximum !== undefined && value > schema.maximum)
+      || (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum)) throw new Error(`${path} is outside its numeric bounds`);
   }
   if (schema.enum && !schema.enum.includes(value)) throw new Error(`${path} must be one of ${schema.enum.join(', ')}`);
 }
@@ -96,7 +107,7 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
   }
   const definitions = [
     defineTool('meteor_read_file', 'Read any accessible file or list a directory. Seeds do not restrict what you can read. Paths are relative to the project unless absolute.',
-      { path: string, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 100000 } }, ['path'], (args, exec) => {
+      { path: string, offset: { type: 'integer', minimum: 0, description: 'Zero-based character offset, not a line number.' }, limit: { type: 'integer', minimum: 1, maximum: 100000, description: 'Maximum characters to return.' } }, ['path'], (args, exec) => {
         const state = host.requireResearch(exec); const path = resolve(state.project.root, args.path);
         if (lstatSync(path).isDirectory()) return { path, entries: readdirSync(path, { withFileTypes: true }).map(d => ({ name: d.name, directory: d.isDirectory() })) };
         const content = readFileSync(path, 'utf8'); const offset = args.offset ?? 0; const limit = args.limit ?? 30000;
@@ -113,7 +124,7 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
         return { path: target, bytes: Buffer.byteLength(args.content) };
       }),
     defineTool('meteor_kernel_build', 'Build one exact kernel revision for this research. Returns an immutable build receipt; mock output is simulated.',
-      { experiment_id: string, kernel_path: string, fixture: {} }, ['experiment_id', 'kernel_path'], async (args, exec) => {
+      { experiment_id: string, kernel_path: { ...string, description: 'Module directory or its kernel.json, relative to project root. File paths inside kernel.json are also relative to project root. Changing source or manifest requires a new revision.' }, fixture: {} }, ['experiment_id', 'kernel_path'], async (args, exec) => {
         const state = host.requireResearch(exec);
         return operation(state, 'build', exec, async (signal, idempotency_key) => {
           const receipt = await state.runtime.build.buildKernel(state.project, { ...args, research_id: state.id, idempotency_key, signal });
@@ -130,7 +141,7 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
         });
       }),
     defineTool('meteor_kernel_profile', 'Collect selected observations for one exact build and selected cases. Profiling does not replace full-case tests or establish causality by itself.',
-      { build_ref: string, case_ids: strings, metrics: strings, fixture: {} }, ['build_ref', 'case_ids', 'metrics'], async (args, exec) => {
+      { build_ref: string, case_ids: strings, metrics: { ...strings, description: 'Use supported_metrics from the hardware report. kernel_time_us is ACL event timing, not a hardware counter. Unsupported metrics return the allowed list.' }, fixture: {} }, ['build_ref', 'case_ids', 'metrics'], async (args, exec) => {
         const state = host.requireResearch(exec); ownBuild(state, args.build_ref);
         return operation(state, 'profile', exec, async (signal, idempotency_key) => {
           const receipt = await state.runtime.profile.profileKernel(state.project, { ...args, idempotency_key, signal });
@@ -171,9 +182,13 @@ export function registerResearchTools(ctx: DshContext, host: MeteorHost): Array<
           remote_request_id: record.remote_request_id, remote_state: record.remote_state };
       }),
     defineTool('meteor_prepare_submission', 'Validate and freeze a complete submission from this session, including full tests for every submitted kernel. Preparation does not commit or integrate. Return the resulting ID through native structured_output when finished.',
-      { submission: { type: 'object', additionalProperties: true } }, ['submission'], async (args, exec) => {
-        const state = host.requireResearch(exec); const submission = object(args.submission);
-        if (submission.research_id !== state.id || submission.agent_session_id !== state.sessionId) throw new Error('Submission identity must match this original research session');
+      { submission: submissionSchema }, ['submission'], async (args, exec) => {
+        const state = host.requireResearch(exec); const supplied = object(args.submission);
+        const identity = { research_id: state.id, agent_session_id: state.sessionId, execution_backend: state.project.config.execution.backend };
+        for (const [key, value] of Object.entries(identity)) {
+          if (supplied[key] !== undefined && supplied[key] !== value) throw new Error('Submission identity must match this original research session: ' + key);
+        }
+        const submission = { ...supplied, ...identity };
         state.preparedIds.clear();
         try {
           const prepared = await state.runtime.submit.prepareSubmission(state.project, submission);

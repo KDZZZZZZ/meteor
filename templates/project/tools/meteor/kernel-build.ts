@@ -6,6 +6,7 @@ import { MockRunner } from './runners/mock.ts';
 import { SshRunner } from './runners/ssh.ts';
 import type { MockFixture, Runner } from './runners/contract.ts';
 import { assertResearchActive } from './research.ts';
+import { assertHardwareReady } from './hardware.ts';
 import { canonical, hashObject, inside, readJson, safeId, sha256, writeImmutable } from './util.ts';
 
 export interface BuildKernelInput {
@@ -35,11 +36,12 @@ export function buildReceiptPath(project: Project, receipt: BuildReceipt): strin
 
 export function selectRunner(project: Project): Runner {
   if (project.config.execution.backend === 'mock') return new MockRunner();
+  assertHardwareReady(project);
   return new SshRunner();
 }
 
 export function readKernelModule(project: Project, kernelPath: string): KernelModule {
-  const cleanPath = slash(kernelPath);
+  const cleanPath = slash(kernelPath).replace(/\/kernel\.json$/, '').replace(/\/$/, '');
   return readJson<KernelModule>(inside(project.root, `${cleanPath}/kernel.json`));
 }
 
@@ -64,6 +66,18 @@ export function computeSourceHash(project: Project, module: KernelModule): strin
   return hashObject(sourcePieces(project, module));
 }
 
+export function assertDeviceKernelSource(project: Project, module: KernelModule): void {
+  if (project.config.execution.backend !== 'ssh') return;
+  const host = readFileSync(inside(project.root, module.host_file), 'utf8');
+  const sources = [host, readFileSync(inside(project.root, module.device_file), 'utf8'),
+    ...module.dependencies.map(dep => readFileSync(inside(project.root, dep.path), 'utf8'))].join('\n');
+  // A supplemental contract check; actual execution is independently checked by msprof.
+  const code = sources.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+  if (/\b(?:aclrtMemcpy(?:Async)?|ACL_MEMCPY_DEVICE_TO_HOST|ACL_MEMCPY_HOST_TO_DEVICE|ASCENDC_CPU_DEBUG)\b|[<"](?:arm_neon|immintrin)\.h[>"]/.test(code)) {
+    throw new Error('Device-kernel contract: host CPU fallback/debug and hidden host-device transfers are not permitted inside the measured candidate. Keep transfers in the harness and implement computation on the NPU.');
+  }
+}
+
 function writeImmutableText(path: string, value: string): void {
   mkdirSync(dirname(path), { recursive: true });
   if (existsSync(path)) {
@@ -75,7 +89,11 @@ function writeImmutableText(path: string, value: string): void {
 }
 
 function assertImmutableKernelRevision(project: Project, module: KernelModule, sourceHash: string): void {
-  writeImmutable(join(project.dataRoot, 'kernel-source-registry', safeId(module.kernel_id), `${safeId(module.revision)}.json`), {
+  const path = join(project.dataRoot, 'kernel-source-registry', safeId(module.kernel_id), `${safeId(module.revision)}.json`);
+  if (existsSync(path) && readJson(path).source_hash !== sourceHash) {
+    throw new Error(`Kernel ${module.kernel_id}@${module.revision} already identifies different source or manifest paths. Reuse its original module path unchanged, or assign a new revision before building.`);
+  }
+  writeImmutable(path, {
     kernel_ref: { kernel_id: module.kernel_id, revision: module.revision },
     source_hash: sourceHash,
     module_ref: `${module.device_file}|${module.host_file}`,
@@ -83,9 +101,11 @@ function assertImmutableKernelRevision(project: Project, module: KernelModule, s
 }
 
 export async function buildKernel(project: Project, input: BuildKernelInput): Promise<BuildReceipt> {
+  input = { ...input, kernel_path: projectRef(project, inside(project.root, slash(input.kernel_path).replace(/\/kernel\.json$/, '').replace(/\/$/, ''))) };
   input.signal?.throwIfAborted();
   assertResearchActive(project, input.research_id, input.experiment_id);
   const module = readKernelModule(project, input.kernel_path);
+  assertDeviceKernelSource(project, module);
   const rendered = renderSingleKernel(project, module, {
     assembly_key: `${input.research_id}-${input.experiment_id}-${module.kernel_id}-${module.revision}`,
   });
@@ -150,6 +170,7 @@ export function validateBuildStillFresh(project: Project, build: BuildReceipt): 
   if (module.kernel_id !== build.kernel_ref.kernel_id || module.revision !== build.kernel_ref.revision) {
     throw new Error(`Build receipt kernel ref does not match current module manifest`);
   }
+  assertDeviceKernelSource(project, module);
   return module;
 }
 
