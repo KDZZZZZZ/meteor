@@ -18,7 +18,7 @@
 
 **2026-09-24 需求修订：** 早期“先 mock、默认 mock、无 SSH 也 ready_mock”的准备方案已被用户的新要求覆盖。mock 保留为显式协议测试能力；初始化不再填入占位设备事实，也不回退到 mock。旧实验、报告和版本记录保留原样，不追认其中缺失的目标设备执行证明。
 
-**2026-09-25 workspace 设计修订（待实现）：** [单 HW workspace 仓库级改造](2026-09-25-single-hardware-workspace-restructure.md)是根配置、路径、公共身份、算子加载、知识库及版本发布的整体迁移；它不依赖分层 IR 或局部策略替换。shape 仍由逐 case 全尺寸实测自动寻找优势区间并形成 version 路由。本轮按人类要求先完成设计，尚未实施迁移。
+**2026-09-25 workspace 设计修订（待实现）：** [单 HW workspace 仓库级改造](2026-09-25-single-hardware-workspace-restructure.md)是根配置、路径、公共身份、算子加载、知识库及版本发布的整体迁移；它与局部策略替换分别实现和验收。shape 仍由逐 case 全尺寸实测自动寻找优势区间并形成 version 路由。本轮按人类要求先完成设计，尚未实施迁移。
 
 **当前交付范围：** 本文记录已实现的研究协议、目标完成条件、skill、文件架构和提示词大纲；[version 模板](../../templates/project/asc/version.asc.tmpl)用于研究结束后的集成，[single-kernel 模板](../../templates/project/asc/kernel_test.asc.tmpl)用于实验包装。mock backend、结构化 SQLite 经验库、提交校验、自动 version 装配和 DSH `0.1.7-alpha.2` 宿主接入已落到模板代码；SSH backend 通过集中 profile 启用，真实硬件验证结果另行记录。按用户选择使用 alpha.2，DSH 接口依据安装包和已核实的官方 commit `00102833dfaee1da9f48a3a8eae9d34005a75218`。
 
@@ -143,7 +143,7 @@ kernel 全尺寸排名、是否击败当前最佳实现、是否产生可集成�
 
 步骤 7 的研究报告不等待集成结果。步骤 8 自动启动并返回独立集成回执，chief 可向用户汇总结果，无需调用集成工具；分桶结果和集成产物不倒填为研究 Agent 的假设证据。
 
-**2026-09-25 设计增补（待实现）：** 第 3 步拟抽成可替换的设计策略，内部可采用“计算图 IR → 硬件任务 IR → 执行预测 → 实测对照”的方法，统一交回实验计划和现有单 kernel 模块。同一 Agent 逐层编写，程序校验约束；测试与分析回执作为后续设计的反馈输入。接口、文件布局、知识分类及 MVP 边界见[可替换的 kernel 实验设计步骤](2026-09-25-pluggable-kernel-design-step.md)。
+**2026-09-25 设计增补（待实现）：** 第 3 步拟抽成可替换的设计策略，统一交回实验计划、现有单 kernel 模块和内部产物引用。策略在同一 Agent 上下文中使用，测试与分析回执作为后续设计的反馈输入。公共接口与接入方式见[可替换的 kernel 实验设计步骤](2026-09-25-pluggable-kernel-design-step.md)。
 
 ## 4. 测试与性能分析 skill
 
@@ -386,12 +386,12 @@ meteor/                                  # 插件源代码与项目模板
   cases/<op>/<dtype>/<suite_revision>/   # shape 在 case 中，不作为目录层
   kernels/<op>/<dtype>/<kernel_id>/<revision>/
     kernel.json / device.asc / host.asc
-  ir/<op>/<dtype>/<design_id>/<revision>/ # 启用分层 IR 策略时的正式产物
+  ir/<op>/<dtype>/<design_id>/<revision>/ # 产物分类位置，内部格式另行定义
   experiments/<op>/<dtype>/<research_id>/<experiment_id>/
     plan.json / analysis.json / artifact-refs.json
   builds/<op>/<dtype>/<build_id>/        # 单 kernel 构建、源码与回执
   measurements/<op>/<dtype>/<run_id>/    # 单 kernel 全尺寸/profile 原始证据
-  comparisons/<op>/<dtype>/<comparison_id>/ # 预测/实测对照与生成注释视图
+  comparisons/<op>/<dtype>/<comparison_id>/ # 实验对比与派生阅读视图
   versions/<op>/<dtype>/<version_id>/
     kernel.asc / spec.json / selections.json / manifest.json
   reports/<op>/<dtype>/<research_id>/    # 给 chief 的报告、集成回执引用

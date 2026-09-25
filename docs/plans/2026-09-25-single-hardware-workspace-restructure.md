@@ -8,7 +8,7 @@
 
 这是一项独立的仓库级改造，覆盖初始化、根配置、算子加载、文件路径、身份索引、源码注册、缓存、经验库、实验记录、提交与版本发布。即使研究 Agent 继续直接编写 kernel，也应使用这个仓库结构。
 
-“把设计实验并编写 kernel 抽成可替换策略”是另一项局部改造，消费这里定义的 workspace/target 和公共产物接口。二者可以分别实现与验收，仓库迁移不依赖分层 IR 策略上线。
+“把设计实验并编写 kernel 抽成可替换策略”是另一项局部改造，消费这里定义的 workspace/target 和公共产物接口。二者可以分别实现与验收。
 
 本设计规范 `meteor_init` 生成和管理的实验仓库。Meteor 插件源码中的通用工具与模板负责生成这种实例；一个模板包可以包含多个硬件适配实现，每个生成的仓库只绑定其中一个真实 HW。
 
@@ -32,7 +32,7 @@
 | HW 预测器 | 本仓库唯一 HW 的入口与版本化规则，各 op/dtype 可以复用 |
 | 结构化经验库 | 一份正式 catalog 与内容寻址 artifact 库，记录共享规则及具体目标组知识 |
 | 执行工具和设备队列 | 统一身份检查、预算、远端状态及物理设备锁；不同 op/dtype 的测试仍排队 |
-| 设计策略注册表 | 可选 `direct-code`、`layered-ir` 等，同一策略可服务多个目标组 |
+| 设计策略注册表 | 现有直接编写方式与后续替换实现共用公共契约，同一策略可服务多个目标组 |
 
 设备锁按实际物理设备建立，不能因 op、dtype 或仓库目录不同创建互不相干的锁。不同研究可并行设计与分析；计时和占用同一设备的实验仍遵循原队列。
 
@@ -71,15 +71,12 @@
     suite.json / inputs/ / oracle-results/
   kernels/<op>/<dtype>/<kernel_id>/<revision>/
     kernel.json / device.asc / host.asc
-  ir/<op>/<dtype>/<design_id>/<revision>/
-    semantic.json / graph.json / tasks.json
-    execution.predicted.json / mapping.json / validation.json
+  ir/<op>/<dtype>/<design_id>/<revision>/  # 按产物种类预留位置，内部格式另行定义
   experiments/<op>/<dtype>/<research_id>/<experiment_id>/
     plan.json / analysis.json / artifact-refs.json
   builds/<op>/<dtype>/<build_id>/           # 冻结源码、二进制与构建回执
   measurements/<op>/<dtype>/<run_id>/       # 单 kernel test/profile 与原始观测
-  comparisons/<op>/<dtype>/<comparison_id>/
-    execution.observed.json / comparison.json / annotated/
+  comparisons/<op>/<dtype>/<comparison_id>/ # 实验对比与派生阅读视图
   versions/<op>/<dtype>/<version_id>/
     kernel.asc / spec.json / selections.json / manifest.json
   reports/<op>/<dtype>/<research_id>/
@@ -130,7 +127,7 @@ Chief 启动研究时指定 `target`，工具解析并固定对应全部引用�
 
 ### 4.2 与可替换设计步骤的关系
 
-`DesignContext` 接收 `workspace_ref`、`target` 和已解析的契约/oracle/suite/HW 引用。设计策略只产生当前组的实验计划、IR 和候选，不管理仓库布局、全局配置或其他组的版本。
+`DesignContext` 接收 `workspace_ref`、`target` 和已解析的契约/oracle/suite/HW 引用。设计策略只产生当前组的实验计划、候选及内部产物引用，不管理仓库布局、全局配置或其他组的版本。
 
 同一仓库结构可以先运行现有直接编写方式，再启用[可替换的 kernel 设计步骤](2026-09-25-pluggable-kernel-design-step.md)。策略切换不重新创建 workspace，也不改变 shape 与 version 契约。
 
@@ -150,7 +147,7 @@ Chief 启动研究时指定 `target`，工具解析并固定对应全部引用�
 
 同一仓库可以有同名 kernel、case 或 version，组别不同就不是同一对象。`kernel@revision` 等旧的裸材料引用仅在具有明确旧作用域时解析；多组下不能按第一个同名对象猜测。
 
-正式 catalog 只有一份，按 scope 查询。两类设计知识仍为 `prediction_rule` 和 `ir_technique`，与 observation/mechanism/hypothesis/counterexample 分类正交；适用范围可覆盖多个 op/dtype。HW 通用知识不强行复制到每组目录。
+正式 catalog 只有一份，按 scope 查询；保留知识分类、来源、证据与适用范围，适用范围可覆盖多个 op/dtype。现有 observation/mechanism/hypothesis/counterexample 分类继续使用；HW 通用知识不强行复制到每组目录。
 
 迁移按表同步类型、严格 JSON schema、数据库键/外键、查询、材料采样、导出视图和新鲜度索引。不能只在路径加两级目录，或仅在 schema 中增加允许任意字段。
 
@@ -222,7 +219,7 @@ Chief 启动研究时指定 `target`，工具解析并固定对应全部引用�
 
 ### 阶段 A：公共身份与根配置
 
-实现单 HW workspace、target 注册/解析、公共路径服务、全链路 scope、catalog 格式检查。旧单算子路径通过明确兼容适配器读取。先用现有直接编写流程验证，不依赖 IR 功能。
+实现单 HW workspace、target 注册/解析、公共路径服务、全链路 scope、catalog 格式检查。旧单算子路径通过明确兼容适配器读取。先用现有直接编写流程验证。
 
 ### 阶段 B：分类归档与自动集成
 
