@@ -2,6 +2,8 @@
 
 **目标：** meteor 在 live/chief 当前目录初始化实验仓库、研究工具、skill、经验库和集成模板。chief 协助用户配置环境、维护仓库，并决定何时启动多少个研究 subagent。每个 subagent 围绕一个明确的性能相关假设，持续设计实验、编写 kernel、调用测试及性能分析 skill，直到获得足以支持或证伪该假设的证据；受资源或证据限制而结束时，明确报告尚未完成验证。
 
+**仓库边界：** 一个实验仓库实例绑定一个真实 HW，其 op、dtype 和所有 shape 共享 workspace。正式产物按“产物种类 → op → dtype”分类；每轮 research 固定目标组，各组分别维护 suite、kernel 池和 version 序列，共享硬件预测器、结构化经验库与设备队列。这是仓库级架构，独立于第 3 步采用哪一种设计策略。
+
 **研究单元：** 一个 `research_id` 对应一个连续的 subagent session，可包含多轮实验、多个 kernel 和多个不可变 revision。Agent 自主决定实验顺序、测试调用、分析和下一轮修改。全部研究共用一份基础提示词，测试与性能分析分别作为可调用 skill。
 
 **用户补充的 chief 职责：** 启动时可配置本轮随机分发，或指定初始 kernel 与知识；也可要求验证给定假设。默认随机分发沿用新鲜度策略，指定材料不混入随机抽样。给定假设可与任一材料模式组合，只有缺省时才由 subagent 提出。材料只作启发；给定假设是本轮验证目标。manifest 与 seed 保存 chief 输入和实际分发。
@@ -15,6 +17,8 @@
 **运行与访问：** 默认状态为 `unconfigured`。chief 通过 `meteor_hardware_probe(profile_ref?)` 接通集中 SSH profile、调试真实设备并读取生成的硬件报告；未配置或未就绪时不启动研究。连接凭据集中管理，项目只保存 profile 引用。chief 可访问全部文件并负责配置；subagent 也可读取当前运行环境中所有文件，遵循原有操作系统权限。分发的 kernel/知识仅用于启发，鼓励主动阅读其他实现、知识和实验记录。
 
 **2026-09-24 需求修订：** 早期“先 mock、默认 mock、无 SSH 也 ready_mock”的准备方案已被用户的新要求覆盖。mock 保留为显式协议测试能力；初始化不再填入占位设备事实，也不回退到 mock。旧实验、报告和版本记录保留原样，不追认其中缺失的目标设备执行证明。
+
+**2026-09-25 workspace 设计修订（待实现）：** [单 HW workspace 仓库级改造](2026-09-25-single-hardware-workspace-restructure.md)是根配置、路径、公共身份、算子加载、知识库及版本发布的整体迁移；它不依赖分层 IR 或局部策略替换。shape 仍由逐 case 全尺寸实测自动寻找优势区间并形成 version 路由。本轮按人类要求先完成设计，尚未实施迁移。
 
 **当前交付范围：** 本文记录已实现的研究协议、目标完成条件、skill、文件架构和提示词大纲；[version 模板](../../templates/project/asc/version.asc.tmpl)用于研究结束后的集成，[single-kernel 模板](../../templates/project/asc/kernel_test.asc.tmpl)用于实验包装。mock backend、结构化 SQLite 经验库、提交校验、自动 version 装配和 DSH `0.1.7-alpha.2` 宿主接入已落到模板代码；SSH backend 通过集中 profile 启用，真实硬件验证结果另行记录。按用户选择使用 alpha.2，DSH 接口依据安装包和已核实的官方 commit `00102833dfaee1da9f48a3a8eae9d34005a75218`。
 
@@ -61,6 +65,8 @@ flowchart TD
 **ADR-05：单 kernel 实验与 version 集成使用不同装配入口。** 实验入口只绑定一个 kernel revision；集成模板在研究完成后按路由清单绑定多个实现。研究 Agent 不选择集成基底，不生成分桶或集成版测试任务。
 
 **ADR-06：测试随 kernel 交付，集成由提交事件触发。** 编写 subagent 对提交 kernel 的全尺寸测试完成负责。宿主在原会话结束前校验交付包，原会话最终提交并入库后自动安排集成；chief 不承担逐项补测、选择集成批次或发起集成调用。自动集成只是研究后的确定性收尾，不控制 Agent 的实验循环。
+
+**ADR-07：单 HW workspace 是公共仓库边界。** 初始化、配置、算子/类型注册、身份与缓存、结构化存储和版本发布都使用同一个 workspace 及其目标组；正式产物按种类/op/dtype 组织。第 3 步的可替换策略消费此边界，不能自行实现一套局部仓库布局。完整迁移与旧证据兼容另见仓库级改造方案。
 
 ### 1.1 Chief 的默认操作职责
 
@@ -190,6 +196,8 @@ kernel 全尺寸排名、是否击败当前最佳实现、是否产生可集成�
 
 全尺寸指本研究固定的有限 `case_suite_revision`。**每个用于实验的 kernel revision，以及每个最终提交的 kernel，都必须拥有自己的全尺寸记录。** 对照和消融 kernel 同样适用；已有记录仅在源码、case、环境和测量协议满足复用条件时引用，时效或配对要求不满足则复测。
 
+在单 HW、多 op/dtype 的 workspace 设计下，本研究固定一个 `op_id + dtype_id`，全尺寸对应这一组的 suite；不混入其他目标组的 case，也不因 shape 不同拆 workspace。
+
 提交 kernel 的测试由编写 subagent 在本轮内负责完成并核对。最终提交必须关联已完成的 full run，源码、依赖、case suite、硬件/工具链和测量协议与交付一致；不得把待测、排队中或部分执行的记录交给 chief 或集成程序补齐。只有准确匹配该 revision 的完整历史记录才可复用，核对责任仍属于提交者。
 
 1. 全量枚举 case，记录 `PASS / INCORRECT / UNSUPPORTED / RESOURCE_REJECTED / RUN_FAILED / TIMEOUT / NOT_RUN` 等状态及原因；性能只对有效执行且正确的 case 记录。
@@ -271,6 +279,8 @@ Agent 最终答复引用准备好的冻结输出后，以 `research_id/submissio
 
 subagent 结束并完成有效提交后，宿主的提交事件处理器自动调用内部集成服务。程序从提交包和项目配置取得本轮 kernels、可比较的历史已提交 kernels、目标 case suite、集成策略及当前基底 version。默认按每次有效提交触发；不要求 chief 调用、逐次确认或手动选择集成批次。基底由程序管理，研究 Agent 无需选择。
 
+单 HW workspace 修订为候选池、基底和版本通道增加 `workspace/op/dtype` 作用域。各组内继续执行下面同一套逐 case 选择、shape 区间归并和 version 装配；不同组共享知识与设备，不混合性能排名。
+
 集成程序执行：
 
 1. 读取 Agent 明确提交的 kernel 与适用范围，核对各自完整、正确、可比的单 kernel 全尺寸矩阵；假设 supported/refuted 不作为 kernel 入选条件。
@@ -328,6 +338,8 @@ P(x) = epsilon / |E| + (1 - epsilon) * weight(x) / sum(weight(y), y in E)
 
 插件提供宿主接入和项目模板。初始化后的代码、基础提示词、skill、实验契约及模板由 chief 维护。
 
+下面给出 2026-09-25 修订后的整体目标布局。它覆盖初始化及公共 runtime 的产物组织；当前代码尚需迁移。现有旧路径的兼容、数据库版本和运行中快照处理见[仓库级改造方案](2026-09-25-single-hardware-workspace-restructure.md)。
+
 ```text
 meteor/                                  # 插件源代码与项目模板
   package.json
@@ -341,12 +353,15 @@ meteor/                                  # 插件源代码与项目模板
   templates/project/
     asc/version.asc.tmpl                 # 已有：仅用于研究交付后的集成
     asc/kernel_test.asc.tmpl              # 只绑定一个 kernel 的实验入口
-    ...                                  # 以下项目结构的版本化模板
+    ...                                  # 当前包内模板，需迁移为下面的目标布局
 ```
 
 ```text
 <chief 当前目录>/
-  meteor.config.json                     # 默认 unconfigured、预算、抽样、case suite、集中连接引用
+  meteor.config.json                     # workspace/HW 绑定、op/dtype 注册、共享默认配置
+  hardware/target.json                   # chief 真实探测后建立，初始 unconfigured
+  hardware/reports/<probe_id>/           # 不可变硬件报告与环境事实
+  predictors/                           # 本 HW 共享的预测器与规则引用
   prompts/meteor.md                      # 唯一研究 subagent 基础提示词
   .dsh/skills/
     meteor-kernel-test/SKILL.md           # Agent 主动使用的独立 kernel 测试方法
@@ -366,37 +381,37 @@ meteor/                                  # 插件源代码与项目模板
       contract.ts / mock.ts / fixtures/
       ssh.ts                             # 用户提供 profile 后接入
     tests/
-  asc/
-    kernel_test.asc.tmpl
-    version.asc.tmpl
-    operator.json / host_context.asc.inc
-    common/ / schemas/
-  kernels/<kernel_id>/<revision>/
+  templates/                            # 通用包装/集成模板及 schema
+  contracts/<op>/<dtype>/                # 每组算子契约、oracle、适配/模板引用
+  cases/<op>/<dtype>/<suite_revision>/   # shape 在 case 中，不作为目录层
+  kernels/<op>/<dtype>/<kernel_id>/<revision>/
     kernel.json / device.asc / host.asc
+  ir/<op>/<dtype>/<design_id>/<revision>/ # 启用分层 IR 策略时的正式产物
+  experiments/<op>/<dtype>/<research_id>/<experiment_id>/
+    plan.json / analysis.json / artifact-refs.json
+  builds/<op>/<dtype>/<build_id>/        # 单 kernel 构建、源码与回执
+  measurements/<op>/<dtype>/<run_id>/    # 单 kernel 全尺寸/profile 原始证据
+  comparisons/<op>/<dtype>/<comparison_id>/ # 预测/实测对照与生成注释视图
+  versions/<op>/<dtype>/<version_id>/
+    kernel.asc / spec.json / selections.json / manifest.json
+  reports/<op>/<dtype>/<research_id>/    # 给 chief 的报告、集成回执引用
+  research/<op>/<dtype>/<research_id>/
+    manifest.json / seed.json / material_refs.jsonl
+    hypothesis.json / hypothesis_history/
+    memory.md / checkpoint.json / submission-draft.json
+    snapshot/ / drafts/                  # 过程目录，正式产物按上述种类归档
   knowledge/
-    migrations/0001.sql / store.py / query.py
-  tools/remote_npu/                      # 可从用户原 workspace 适配的远端 harness 入口，模板不复制凭据
-  versions/
-    kernel_meteor_version_<id>.asc
-    <id>.spec.json / <id>.manifest.json / <id>.source-map.json
-  reports/meteor/<mock|ssh>/
-    research/<research_id>/
-      manifest.json / seed.json / material_refs.jsonl
-      hypothesis.json / hypothesis_history/
-      drafts/                            # 本轮多个 kernel 的可写草稿
-      experiments/<experiment_id>/
-        plan.json                        # 对照/干预/预测及固定输入
-        kernel_refs.json
-        builds/ / full-tests/ / profiles/ / analysis.json
-      memory.md / checkpoint.json
-      submission.json / report.json / report.md
-    integrations/<integration_id>/
-      inputs.json / selections.json / report.json
-    knowledge/
-      catalog.sqlite / artifacts/ / snapshots/<revision>/
+    migrations/ / store.py / query.py    # 单调 schema 升级及作用域查询
+    catalog.sqlite / artifacts/          # workspace 共用的正式库
+    shared/                             # 通用 HW 规则和跨组技巧索引
+    prediction-rules/<op>/<dtype>/       # 分类索引/视图
+    ir-techniques/<op>/<dtype>/          # 分类索引/视图
+  .meteor/state/                        # 宿主状态、请求、提交及集成事件索引
+  .meteor/migrations/                   # 迁移清单、检查点及验证报告
+  .meteor/mock/                         # 显式测试的独立 catalog 和产物
 ```
 
-`meteor_init` 在当前 cwd 复用现有 Git 根或初始化 Git，生成项目代码、两个 skill、唯一基础提示词、模板和 schema；不自动创建远端或提交。已有源码首次导入由 chief 适配为模块，保留来源和验证状态。
+目标初始化行为：`meteor_init` 在当前 cwd 明确本实验仓库根，核对已有实例的 HW 绑定后复用或初始化 Git，生成公共代码、两个 skill、唯一 persona、模板与 target 注册；不自动创建远端或提交。新注册 op/dtype 仍位于本 workspace。已有源码首次导入由 chief 适配为对应组的模块，保留来源和验证状态。
 
 重复 init 仅补缺失文件，对 chief 已修改的文件提供差异；不覆盖用户修改。没有 SSH 配置时保持 `unconfigured`。chief 使用 `meteor_hardware_probe(profile_ref?)` 接通已有集中配置，调试设备并生成硬件报告；可用 case/oracle、设备及工具链未满足时报告缺口，不启动真实研究。CLI 对应 `meteor hardware [directory] [profile-ref]`。
 

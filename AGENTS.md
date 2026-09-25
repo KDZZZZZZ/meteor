@@ -3,6 +3,7 @@
 ## 用户意图与实施依据
 
 - 以用户明确提出的要求和最新修正为准；已批准的设计见 `docs/plans/2026-09-23-meteor-deepseek-harness-plan.md`。
+- 仓库级改造设计见 `docs/plans/2026-09-25-single-hardware-workspace-restructure.md`：一个实验仓库实例只绑定一个 HW，op/dtype/shape 共享 workspace，正式产物按种类/op/dtype 分类，shape 分桶与 version 自动集成语义保持原意。它是公共架构改造，独立于第 3 步的可替换设计策略；文档标为待实现的能力不得宣称已上线。
 - 人类设计不够清晰时，优先检索并阅读 NVIDIA、Ascend、AMD 的成熟实现及官方文档，再提出最小必要的补充设计。可参考 CUTLASS、CUDA 官方示例、Ascend CANN/Ascend C 官方示例、Composable Kernel、rocWMMA 等与问题实际相关的实现。
 - 阅读实现、测量条件和适用限制；引用到具体源文件及版本/commit，区分直接采用、适配、概念借鉴和独立实现。遵守原实现许可证，不把厂商方案的效果当作本项目已经验证的效果。
 - 资料仍无法消除会影响正确性或用户目标的歧义时，提出一个具体问题；可独立推进的工作继续执行。一般实现细节可自行决定，但必须记录依据和边界。

@@ -2,6 +2,8 @@
 
 状态：设计提案，尚未实现。本文的新配置、工具、类型和目录均为拟议接口。
 
+公共架构依据：[单 HW workspace 仓库级改造](2026-09-25-single-hardware-workspace-restructure.md)单独定义整个仓库的配置、目录、身份、存储与迁移。本设计只定义第 3 步的可替换策略，并消费该公共架构；仓库改造不依赖本策略上线。
+
 ## 1. 本次设计的边界
 
 把研究循环中第 3 步“设计实验并编写 kernel”定义为一个可替换的**设计策略**。首个新策略实现用户手绘图中的分层 IR、逐层约束、硬件执行预测和实测校准；原来的直接编写方式保留为另一种实现。外层研究循环只依赖统一输入输出。
@@ -30,7 +32,8 @@ flowchart TD
 
 | 用户设计 | MVP 中的表达 |
 | --- | --- |
-| Hardware → Ops → Case | 需求与知识的作用域索引：硬件目标、算子契约、固定 suite/case；原始文件可被多个作用域引用 |
+| 一个 HW 一个 workspace | 仓库根绑定唯一真实硬件目标；不同 HW 使用独立仓库实例；多个 op/dtype 在同一实例内共享预测器、知识库与执行队列 |
+| 产物种类 → op → dtype | 源码、IR、case 集、实验、测量、版本和报告分别归类；shape 保留在 case、支持域和路由规则中 |
 | 公式定义与 CPU 精确结果 | 固定算子语义和独立 CPU oracle；任何策略都引用同一份，不按候选的输出修改标准 |
 | 计算图 IR → 硬件任务 IR | Agent 分步描述算子数据流、分块、数据布局、执行资源、搬运、同步和缓冲生命周期 |
 | 预测编译 → 执行 IR | Agent 使用硬件共享的版本化规则，生成执行关系与开销预测 |
@@ -39,9 +42,17 @@ flowchart TD
 | Agent 编写 IR，程序实现约束 | Agent 负责转换和解释；程序逐层校验并返回具体诊断，编译器/runner 提供真实构建与运行事实 |
 | 一个算子拥有多个 kernel | 每个提交 kernel 分别完成全尺寸测试；周期末根据真实数据装配路由 version |
 
-当前工程只支持 `qmq-v1` / int8，且 suite 不接受同 shape 的不同 dtype/layout。MVP 先在这个现有契约上完成替换。作用域类型预留 operator/dtype/layout，**不在本次顺带实现多算子或多 dtype 集成**。
+当前源码只支持 `qmq-v1` / int8，且 suite 不接受同 shape 的不同 dtype/layout。这是待迁移的实现限制。新设计从配置、身份与目录开始容纳同一 HW 下多个 op/dtype，每组各自绑定算子契约、oracle 和 suite；`qmq-v1/int8` 作为首个真机接入组。新增算子的具体 IR 检查和 runner 适配按其契约实现，不能只增加目录就声称已支持。
 
 “CPU 精确结果”指按固定算子契约定义的参考结果。整数累加、浮点舍入、溢出与容差各自按该契约处理；不能笼统承诺所有浮点变换逐位等价。
+
+### 2.1 本步骤消费的公共仓库契约
+
+宿主向策略传入唯一 HW workspace、当前 `op_id/dtype_id`、契约、oracle、suite 和环境引用。策略使用统一路径服务保存本组设计产物，不自行建立 HW 子仓库、私有 catalog 或 shape 目录。
+
+全尺寸、候选身份、知识共享、版本通道和旧证据迁移均按[仓库级改造方案](2026-09-25-single-hardware-workspace-restructure.md)执行。不同 op/dtype 的材料可以启发设计；当前候选与其测试证据必须匹配宿主固定的目标组。
+
+策略返回当前组的单 kernel 候选。后续程序仍用该组的真实全尺寸数据自动寻找 shape 优势区间并生成 version；设计策略不自行分桶或发布版本。
 
 ## 3. 可插拔边界与稳定契约
 
@@ -63,6 +74,8 @@ MVP 提供 `direct-code@1` 与 `layered-ir@1`。二者都是本插件内部注�
 type Ref = string; // 宿主验证来源的文件或内容寻址引用
 
 interface DesignContext {
+  workspace_ref: Ref;          // 唯一 HW 绑定与 workspace 身份
+  target: { op_id: string; dtype_id: string };
   research_id: string;          // 宿主绑定，Agent 不能另换身份
   experiment_id: string;
   hypothesis_revision_ref: Ref;
@@ -89,7 +102,7 @@ interface DesignResult {
 
 `DesignResult` 只在产物已准备好时返回，至少包含一个候选。中间的 `NEEDS_REVISION`、`BLOCKED` 返回诊断及已保存草稿，不冒充完成，也不强制结束研究。研究仍可因证据或预算限制以零提交 kernel 收尾。
 
-公共候选出口继续是现有 `KernelModule`：`kernel_id/revision`、ABI、`symbol_prefix`、launcher、device/host 源码、依赖、`supported_case_ids`、硬件作用域与资源限制。公共出口不包含 version、shape 分桶或“已验证最优区间”。
+公共候选的代码出口继续是现有 `KernelModule`：`kernel_id/revision`、ABI、`symbol_prefix`、launcher、device/host 源码、依赖、`supported_case_ids`、硬件作用域与资源限制。宿主为其附加固定的 workspace/op/dtype 身份，检查 ABI、case 与本组配置一致。公共出口不包含 version、shape 分桶或“已验证最优区间”。
 
 冻结设计时，工具保存候选内容哈希及策略/预测器/规则版本。构建入口核对设计产物与待构建源码相符，再按现有逻辑生成 `source_hash`、构建和测试身份。`READY` 只表示设计侧已完成所要求的检查；真实构建、正确性与性能以之后的回执为准。
 
@@ -186,11 +199,11 @@ Agent 可组织任务到观测的关联、解释差异和提出新规则；程�
 
 ## 5. 硬件共享预测器与结构化经验库
 
-每种兼容硬件目标共享一个预测器入口，其规则可供多个算子复用。硬件目标依据真实报告定义：backend、SoC/架构、相关能力；影响规则的工具链版本与运行条件放入兼容约束。不是每个 kernel 或 research 各养一个与其他研究隔绝的预测器。
+本 workspace 的唯一 HW 共享一个预测器入口，规则供本仓库中的多个 op/dtype 复用。硬件身份来自根绑定的真实报告；影响规则的工具链版本与运行条件放入兼容约束。其他 HW 在各自 workspace 维护预测器和正式证据。
 
 共享的是版本化方法与规则集合。每个研究固定实际使用的 predictor/rule revisions；并行研究可以提交不同修订与反例，通过内容身份和事务追加，不原地覆盖其他研究正在使用的版本。同一 Agent 可明确采纳新规则进入下一次设计，并保留此前预测。
 
-沿用现有 SQLite + 内容寻址 artifact 库，按两类知识建立可查询索引：
+沿用现有 SQLite + 内容寻址 artifact 机制，正式经验在 workspace 级共用一个 catalog，按两类知识建立可查询索引。通用 HW 规则位于共享作用域，特定规则和技巧按 op/dtype 分类；无需为每个算子复制整份库。显式 mock 仍用独立测试数据区，不进入正式 catalog：
 
 | 类别 | 核心字段 | 典型内容 |
 | --- | --- | --- |
@@ -199,9 +212,9 @@ Agent 可组织任务到观测的关联、解释差异和提出新规则；程�
 
 当前 `KnowledgeUpdate.kind` 的 `observation/mechanism/hypothesis/counterexample` 是认识状态分类，应保留。新增可选 `design_knowledge` 结构引用，上述两类作为正交分类，并包含 `scope_ref` 与 `revision_ref`。需要同步扩展 TypeScript 类型、严格提交 schema、SQLite migration、store/query 和材料读取；不能只往现有 JSON 填未知字段。
 
-拟增 `design_knowledge_revisions` 索引表：`claim_id, revision, class, hardware_key, operator_abi?, suite_ref?, scope_ref, artifact_ref, parent_revision?`；详细规则与证据关系仍使用内容寻址 artifact 和现有 evidence links。相同 artifact/revision 重复导入幂等，新鲜度只由新的可追溯进展更新。
+拟增 `design_knowledge_revisions` 索引表：`workspace_id, claim_id, revision, class, hardware_key, op_id?, dtype_id?, suite_ref?, scope_ref, artifact_ref, parent_revision?`。`hardware_key` 必须匹配本 workspace；共享规则的 op/dtype 可为空，跨多组的适用范围由结构化 `scope_ref` 表达。详细规则与证据关系仍使用内容寻址 artifact 和现有 evidence links。相同 artifact/revision 重复导入幂等，新鲜度只由新的可追溯进展更新。
 
-hardware → operator → case 是作用域关系，不把所有知识强制塞成树：硬件规则可以适用于多个算子，IR 技巧可以跨硬件，单次实验仍引用精确 case 集。Agent 的初始材料只是起点，仍可读取其他 kernel、知识与官方资料。
+物理组织遵循“一个 HW 一个 workspace，产物按种类/op/dtype 分类”；知识适用关系仍可多对多。跨 HW 的通用技巧可以作为带来源的知识引用或导入，但其他 HW 的测量不成为本地实测证据。Agent 的初始材料只是起点，仍可读取其他 kernel、知识与官方资料。
 
 ## 6. 文件布局与现有代码接缝
 
@@ -224,44 +237,47 @@ templates/project/knowledge/migrations/
 
 该目录位于已经冻结的 `tools/meteor` 下，策略说明和实现随研究快照固定。只保留一个 `layered-ir/guide.md` 说明分步方法，校验器负责不同阶段的具体错误，不把修复指导散成多个 Agent 提示词。
 
-### 6.2 一次设计与实验的产物
+### 6.2 本步骤使用的分类产物
+
+整体目录定义在[仓库级改造方案](2026-09-25-single-hardware-workspace-restructure.md)。设计策略仅使用其中这些公共位置：
 
 ```text
-reports/meteor/<backend>/research/<research_id>/
-  drafts/designs/<design_id>/
-    semantic.json / graph.json / tasks.json
-    execution.predicted.json / mapping.json
-    rule-proposals.json
-  drafts/<kernel_id>/<revision>/
-    kernel.json / device.asc / host.asc
-  experiments/<experiment_id>/
-    plan.json / analysis.json
-    builds/ / full-tests/ / profiles/     # 现有工具产物
-    designs/<design_id>/                 # 新工具专属、Agent 不直接写
-      manifest.json / validation.json
-      frozen/                           # 所引用设计产物的不可变副本
-      comparisons/<comparison_id>/
-        execution.observed.json / comparison.json
-        annotated/                      # 可选源码证据视图
+research/<op>/<dtype>/<research_id>/drafts/
+  designs/<design_id>/                  # Agent 编写的 IR 与规则提案
+  kernels/<kernel_id>/<revision>/       # 当前可写源码
+ir/<op>/<dtype>/<design_id>/<revision>/  # 工具冻结的设计产物
+  semantic.json / graph.json / tasks.json
+  execution.predicted.json / mapping.json / validation.json
+kernels/<op>/<dtype>/<kernel_id>/<revision>/ # 正式模块出口
+experiments/<op>/<dtype>/<research_id>/<experiment_id>/
+  plan.json / analysis.json / artifact-refs.json
+comparisons/<op>/<dtype>/<comparison_id>/
+  execution.observed.json / comparison.json / annotated/
 ```
 
-草稿放在现有 `drafts/**` 写入范围。`experiments/.../designs` 由新工具写，不扩大 Agent 对原始回执或快照的写权限；冻结内容进入现有内容寻址 artifact 机制。
+正式产物由工具冻结归档，Agent 持续在自身作者目录修改草稿。公共路径、身份与写入权限由仓库 runtime 提供，不由策略重新规定。构建、测量和版本发布仍使用公共工具与其他分类目录。
 
-| 现有接点 | 最小修改 |
+### 6.3 只为设计步骤新增的接缝
+
+以下修改建立在公共 workspace/target 契约上；全局目录迁移、原始身份键、数据库升级和多算子适配见独立仓库级方案。
+
+| 现有接点 | 策略接入修改 |
 | --- | --- |
 | `prompts/meteor.md` 自主实验循环第 3、4 项 | 改为按选中策略设计与编写；测试、分析、假设判定仍用原上下文 |
-| `contracts.ts`、配置加载、`meteor_start` schema | 增加可选 design 选择，兼容旧工程，固定选择及版本/哈希 |
-| `research.ts`、`host.ts` 启动包 | 记录策略、预测器与规则引用；复用已有快照目录 |
-| `src/research-tools.ts` 与 `src/project.ts` | 注册一个 `meteor_design` 调度工具并加载 runtime 模块；沿用研究身份与写入边界 |
-| `meteor_kernel_build` / `kernel-build.ts` | 增加可选 `design_ref`；启用设计契约的研究须引用有效设计回执，核对精确候选内容；ABI 不变 |
-| 两个已有 skill | 说明设计回执、预测引用和真实证据如何往返；不增加测试方式或自动执行流程 |
-| 提交类型/schema、store/query、migration | 记录可选设计/比较引用和两类结构化知识；沿用原事务与新鲜度逻辑 |
+| `contracts.ts`、配置加载、`meteor_start` schema | 在公共 workspace/target 配置上增加可选 design 选择，固定策略版本/哈希 |
+| `research.ts`、`host.ts` 启动包 | 附加策略、预测器、规则引用；所用策略文件随公共快照机制固定 |
+| `src/research-tools.ts` 与 `src/project.ts` | 注册一个 `meteor_design` 并加载策略模块；使用公共路径、身份和写入校验 |
+| `meteor_kernel_build` / `kernel-build.ts` | 增加可选 `design_ref`，核对精确候选内容与设计回执；使用既有单 kernel ABI |
+| 两个已有 skill | 说明设计回执、预测引用和真实证据如何往返；不增加自动执行流程 |
+| 提交类型/schema、store/query、migration | 增加可选设计/比较引用和两类结构化知识，复用公共 scope、事务与新鲜度机制 |
 
 证据回填沿用已有注释提案：`layered-ir` 以任务 IR 为设计事实源，源码标识关联任务，生成的注释视图展示预测与真实证据。避免手工维护两份开销模型。给已测 `device.asc` 添加注释也会改变 source hash；因此只生成单独阅读视图，不修改已测源码。
 
 ## 7. MVP 的实施顺序和验收
 
-1. **先抽出公共接缝。** 用 `direct-code@1` 走统一接口，验证相同候选仍可通过原 build/test/profile/submission；旧工程加载成功。此时不改变研究策略本身。
+前置公共接口由仓库级改造提供；它可以先独立上线并沿用原 Agent 的直接编写流程。本节只验收设计步骤本身。
+
+1. **抽出设计步骤接缝。** 用 `direct-code@1` 走统一接口，验证相同候选仍可通过公共 build/test/profile/submission。
 2. **接入分层 IR 策略。** 对 qmq 提供最小 graph/task/execution schema、逐层诊断、CPU 有界参考校验及精确候选冻结。Agent 收到错误后在原会话修订。
 3. **接入预测与证据闭环。** 一个 Ascend 硬件预测器入口，真实回执到执行 IR 的关联，整 kernel 指标对照与未知项报告；修订进入结构化知识库。
 4. **运行一次真实研究。** 同一 subagent 至少完成一次“分层设计 → 构建 → 测试/profile → 比较 → 修订”，每个提交 revision 全尺寸测试完整，由已有提交程序自动集成。
@@ -269,6 +285,7 @@ reports/meteor/<backend>/research/<research_id>/
 关键验收不是 JSON 文件数量，而是：
 
 - 在同一个研究外壳中切换 `direct-code` / `layered-ir`，外层 build/test/profile 和 kernel ABI 不需要策略专用分支。
+- 策略消费公共 workspace/target 身份与分类路径，候选不跨目标组；公共仓库的命名碰撞、缓存和版本隔离另由仓库级验收覆盖。
 - 非法 shape/依赖、buffer 过早复用、超出已知容量、父产物变更、候选源码与设计不一致时，能拒绝并给出明确诊断。
 - 缺少区域观测时保持 `UNOBSERVED`；模拟、静态推导、硬件观测不混用；历史证据不能绑定到新源码。
 - 一个真实任务完成预测—实测对照及规则修订；原 session ID 连续，测试仍由 Agent 主动调用，未绕过设备队列。
@@ -283,6 +300,7 @@ reports/meteor/<backend>/research/<research_id>/
 | Agent 转换、程序校验 | 符合用户设计，能逐步扩充规则；检查能力必须明确 | 全自动编译器投入过大，单靠自然语言检查不可可靠验收 |
 | 测量通过公共回执反馈 | 设计策略可替换、执行队列与证据门槛复用；需维护观测映射 | 在策略内部自动跑实验会把原 Agent 的测试控制隐藏掉 |
 | 硬件预测器与策略分离 | 同硬件知识可复用，规则变化不重做研究外壳；要管理兼容版本 | 每个 kernel 私有预测器难以累计知识，单一无版本全局文件难以追溯 |
+| 依赖公共仓库契约 | 策略不拥有根目录、HW 绑定或全局数据库迁移，替换策略不再次搬迁产物 | 把仓库布局封装进策略会使每次替换都影响整个实验仓库 |
 
 ### 成熟实现借鉴
 
@@ -293,8 +311,8 @@ reports/meteor/<backend>/research/<research_id>/
 
 本提案不复制上述项目源码；若实现阶段复制或适配代码，需要记录精确源文件/commit 和许可证。
 
-**人类设计：** 只替换实验设计/编写 kernel 这一步；Hardware/Ops/Case 层次；分层 IR、硬件共享预测、预测/实测校准、两类结构化知识、Agent 转换与程序约束，以及已有单会话/全尺寸/周期末集成要求。
+**人类设计：** 设计策略只替换实验设计/编写 kernel 这一步；一个 HW 一个仓库实例，所有 op/dtype/shape 共享 workspace，产物按种类/op/dtype 分类；shape 与 version 仍自动寻找并装配实测优势区间；分层 IR、硬件共享预测、预测/实测校准、两类结构化知识、Agent 转换与程序约束，以及已有单会话/全尺寸/周期末集成要求。
 
-**Agent 补充设计：** strategy/predictor 两个替换边界、公共输入输出、单工具四种 action、版本/hash 冻结、草稿与不可变回执布局、兼容旧工程、MVP 范围与分阶段验收。上述选择仍可在实现前修改。
+**Agent 补充设计：** strategy/predictor 两个替换边界、设计步骤输入输出、单工具四种 action、版本/hash 冻结、IR 产物与比较协议、MVP 范围及验收。公共 workspace、目录分类、身份和迁移的具体方案由独立仓库级设计负责。
 
 **验证状态：** 已对照现有 persona、构建 ABI、快照、写入范围、提交 schema、知识库和集成入口核查设计接缝；未实现或声称已完成 IR 真机研究验收。

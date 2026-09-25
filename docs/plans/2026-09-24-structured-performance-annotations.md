@@ -280,6 +280,8 @@ status -> VALID | UNAVAILABLE | FAILED | AMBIGUOUS | STALE
 
 ## 9. 接入位置与文件结构
 
+以下路径是早期提案布局。正式产物统一按“产物种类 → op → dtype”归档的要求属于[单 HW workspace 仓库级改造](2026-09-25-single-hardware-workspace-restructure.md)，独立于局部设计策略。本文区段标识、预测/实测区分、不可变证据和生成注释视图的语义继续适用，shape 保留在 case 与自动路由中。
+
 ```text
 templates/project/
   tools/meteor/perf/
