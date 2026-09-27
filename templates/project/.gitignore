@@ -1,0 +1,14 @@
+reports/
+.meteor.local.json
+.meteor/state/
+.meteor/mock/
+.meteor/migrations/
+builds/
+measurements/
+node_modules/
+*.sqlite*
+*.pyc
+__pycache__/
+.env*
+*.pem
+*.key

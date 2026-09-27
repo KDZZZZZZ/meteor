@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "ascend-dev": {
+      "ssh_alias": "ascend-dev",
+      "remote_root": "/mnt/workspace/meteor",
+      "device_id": "0",
+      "connect_timeout_seconds": 15
+    }
+  }
+}

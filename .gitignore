@@ -1,4 +1,6 @@
 node_modules/
+__pycache__/
+*.pyc
 .meteor/
 .meteor.local.json
 .dsh/meteor/local.json

@@ -1,0 +1,259 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Dependency, KernelModule, Project } from './contracts.ts';
+import { assert, inside, sha256 } from './util.ts';
+import { assertTarget, isWorkspace, targetFile } from './workspace.ts';
+
+export const VERSION_TEMPLATE_SLOT_CONTRACT = 'meteor-version-slots-v1' as const;
+export const VERSION_TEMPLATE_REQUIRED_SLOTS = [
+  'ASSEMBLY_KEY', 'DEPENDENCY_PREAMBLE', 'SHARED_CODE', 'HOST_CONTEXT_HELPERS',
+  'KERNEL_DEVICE_CODE', 'KERNEL_HOST_LAUNCHERS', 'IMPLEMENTATION_TABLE', 'BUCKET_TABLE', 'ROUTE_FUNCTION_BODY',
+] as const;
+
+export interface SingleKernelRenderOptions {
+  assembly_key?: string;
+  host_context_helpers?: string;
+}
+
+export interface VersionImplementation {
+  implementation_id: number;
+  module: KernelModule;
+}
+
+export interface VersionRouteRule {
+  rule_id: number;
+  implementation_id: number;
+  case_ids?: string[];
+  shape?: Partial<{ m: number; n: number; k: number }>;
+}
+
+export interface VersionSpec {
+  assembly_key: string;
+  host_context_helpers?: string;
+  implementations: VersionImplementation[];
+  routes: VersionRouteRule[];
+}
+
+function readTemplate(project: Project, name: string): string {
+  return readFileSync(inside(targetFile(project, 'template_ref'), name), 'utf8');
+}
+
+export function validateAssemblyTemplateText(template: string): void {
+  const known = new Set<string>(VERSION_TEMPLATE_REQUIRED_SLOTS as unknown as string[]);
+  const placeholders = [...template.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map(match => match[1]);
+  for (const slot of placeholders) assert(known.has(slot), `Unknown assembly template slot: ${slot}`);
+  for (const slot of VERSION_TEMPLATE_REQUIRED_SLOTS) {
+    const count = placeholders.filter(item => item === slot).length;
+    assert(count === 1, `Assembly template slot ${slot} must appear exactly once`);
+  }
+}
+
+function readVersionTemplate(project: Project): string {
+  if (isWorkspace(project)) {
+    assert(project.target?.assembly_template_ref, 'Assembly template setup required: Chief must configure assembly_template_ref for this op/dtype before automatic version integration');
+    const path = targetFile(project, 'assembly_template_ref');
+    assert(existsSync(path), `Assembly template missing: ${project.target.assembly_template_ref}`);
+    const text = readFileSync(path, 'utf8');
+    if (project.target.assembly_template?.sha256) assert(sha256(text) === project.target.assembly_template.sha256, 'Assembly template hash mismatch; rerun Chief template configuration for this target');
+    validateAssemblyTemplateText(text);
+    return text;
+  }
+  const text = readTemplate(project, 'version.asc.tmpl');
+  validateAssemblyTemplateText(text);
+  return text;
+}
+
+function readPinnedHostContext(project: Project): string {
+  return readTemplate(project, 'host_context.asc.inc');
+}
+
+function renderSlots(template: string, slots: Record<string, string>): string {
+  let output = template;
+  for (const [name, value] of Object.entries(slots)) {
+    const marker = `{{${name}}}`;
+    const count = output.split(marker).length - 1;
+    assert(count === 1, `Template slot ${name} must appear exactly once`);
+    output = output.split(marker).join(value);
+  }
+  const leftover = output.match(/\{\{([^}]+)\}\}/);
+  assert(!leftover, leftover ? `Unrendered or unknown template slot remains: ${leftover[1]}` : 'Unrendered template slot remains');
+  return output;
+}
+
+function validatePrefix(prefix: string): void {
+  assert(/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(prefix), `Invalid immutable symbol prefix: ${prefix}`);
+}
+
+function validateUint32(value: number, label: string): void {
+  assert(Number.isInteger(value) && value > 0 && value <= 0xFFFFFFFF, `${label} must be a positive uint32`);
+}
+
+function validateSuite(project: Project): void {
+  const seenShapes = new Set<string>();
+  const seenCases = new Set<string>();
+  for (const item of project.suite.cases) {
+    assert(!seenCases.has(item.case_id), `Duplicate case_id in suite: ${item.case_id}`);
+    seenCases.add(item.case_id);
+    validateUint32(item.shape.m, `case ${item.case_id} m`);
+    validateUint32(item.shape.n, `case ${item.case_id} n`);
+    validateUint32(item.shape.k, `case ${item.case_id} k`);
+    const shapeKey = `${item.shape.m}x${item.shape.n}x${item.shape.k}`;
+    assert(!seenShapes.has(shapeKey), `Duplicate shape in suite: ${shapeKey}`);
+    seenShapes.add(shapeKey);
+  }
+}
+
+function validateModule(module: KernelModule, project: Project): void {
+  if (isWorkspace(project)) assertTarget(project, module.target, 'Assembly module');
+  assert(module.operator_abi === project.suite.operator_abi, `Module ${module.kernel_id}@${module.revision} ABI does not match suite`);
+  validatePrefix(module.symbol_prefix);
+  assert(module.launcher === `${module.symbol_prefix}launch`, `Launcher mismatch: symbol_prefix ${JSON.stringify(module.symbol_prefix)} requires launcher ${JSON.stringify(`${module.symbol_prefix}launch`)}, got ${JSON.stringify(module.launcher)}. Concatenate the prefix and "launch" exactly; include any separator in symbol_prefix. Make the manifest and host function agree, then retry.`);
+  const knownCases = new Set(project.suite.cases.map(item => item.case_id));
+  const seenSupported = new Set<string>();
+  for (const caseId of module.supported_case_ids) {
+    assert(knownCases.has(caseId), `Module ${module.kernel_id}@${module.revision} declares unknown supported case: ${caseId}. Use case IDs from this fixed suite: ${[...knownCases].join(', ')}`);
+    assert(!seenSupported.has(caseId), `Module ${module.kernel_id}@${module.revision} duplicates supported case: ${caseId}`);
+    seenSupported.add(caseId);
+  }
+  for (const dep of module.dependencies) validateDependency(project, dep);
+}
+
+function validateDependency(project: Project, dep: Dependency): void {
+  assert(/^[A-Za-z0-9_.-]{1,120}$/.test(dep.id), `Invalid dependency id: ${dep.id}`);
+  const text = readFileSync(inside(project.root, dep.path), 'utf8');
+  assert(sha256(text) === dep.sha256, `Dependency hash mismatch: ${dep.path}`);
+}
+
+function readSource(project: Project, path: string): string {
+  return readFileSync(inside(project.root, path), 'utf8');
+}
+
+function emitDependencies(project: Project, modules: KernelModule[]) {
+  const seen = new Map<string, Dependency>();
+  for (const module of modules) {
+    for (const dep of module.dependencies) {
+      const prior = seen.get(dep.id);
+      if (prior) {
+        assert(prior.path === dep.path && prior.sha256 === dep.sha256 && prior.kind === dep.kind, `Dependency id conflict: ${dep.id}`);
+      } else {
+        seen.set(dep.id, dep);
+      }
+    }
+  }
+  const deps = [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
+  const preamble = deps.filter(dep => dep.kind === 'preamble').map(dep => readSource(project, dep.path)).join('\n');
+  const shared = deps.filter(dep => dep.kind === 'shared').map(dep => readSource(project, dep.path)).join('\n');
+  return { preamble, shared };
+}
+
+function moduleDevice(project: Project, module: KernelModule): string {
+  return `// meteor module ${module.kernel_id}@${module.revision} device\n${readSource(project, module.device_file)}`;
+}
+
+function moduleHost(project: Project, module: KernelModule): string {
+  return `// meteor module ${module.kernel_id}@${module.revision} host\n${readSource(project, module.host_file)}`;
+}
+
+function conditionFor(rule: VersionRouteRule, project: Project): string {
+  validateUint32(rule.rule_id, `route rule ${rule.rule_id}`);
+  validateUint32(rule.implementation_id, `route implementation ${rule.implementation_id}`);
+  const parts: string[] = [];
+  if (rule.case_ids && rule.case_ids.length > 0) {
+    const known = new Map(project.suite.cases.map(item => [item.case_id, item.shape]));
+    const caseParts = rule.case_ids.map(caseId => {
+      const shape = known.get(caseId);
+      assert(shape, `Unknown route case_id: ${caseId}`);
+      return `(shape.m == ${shape.m}U && shape.n == ${shape.n}U && shape.k == ${shape.k}U)`;
+    });
+    parts.push(`(${caseParts.join(' || ')})`);
+  }
+  if (rule.shape) {
+    assert(rule.shape.m !== undefined && rule.shape.n !== undefined && rule.shape.k !== undefined, `Route rule ${rule.rule_id} cannot use partial shape predicates`);
+    validateUint32(rule.shape.m, `route rule ${rule.rule_id} m`);
+    validateUint32(rule.shape.n, `route rule ${rule.rule_id} n`);
+    validateUint32(rule.shape.k, `route rule ${rule.rule_id} k`);
+    const exact = project.suite.cases.find(item => item.shape.m === rule.shape!.m && item.shape.n === rule.shape!.n && item.shape.k === rule.shape!.k);
+    assert(exact, `Route rule ${rule.rule_id} shape is outside the measured case suite`);
+    if (rule.case_ids) assert(rule.case_ids.includes(exact.case_id), `Route rule ${rule.rule_id} shape predicate disagrees with case_ids`);
+    parts.push(`shape.m == ${rule.shape.m}U`);
+    parts.push(`shape.n == ${rule.shape.n}U`);
+    parts.push(`shape.k == ${rule.shape.k}U`);
+  }
+  assert(parts.length > 0, `Route rule ${rule.rule_id} has no predicate`);
+  return parts.join(' && ');
+}
+
+export function renderSingleKernel(project: Project, module: KernelModule, options: SingleKernelRenderOptions = {}): string {
+  validateSuite(project);
+  validateModule(module, project);
+  const deps = emitDependencies(project, [module]);
+  const template = readTemplate(project, 'kernel_test.asc.tmpl');
+  return renderSlots(template, {
+    ASSEMBLY_KEY: options.assembly_key ?? `${module.kernel_id}-${module.revision}`,
+    DEPENDENCY_PREAMBLE: deps.preamble,
+    SHARED_CODE: deps.shared,
+    HOST_CONTEXT_HELPERS: options.host_context_helpers ?? readPinnedHostContext(project),
+    KERNEL_DEVICE_CODE: moduleDevice(project, module),
+    KERNEL_HOST_LAUNCHERS: moduleHost(project, module),
+    KERNEL_LAUNCH_CALL: `status = ${module.launcher}(call, shape, resources);`,
+  });
+}
+
+export function renderVersion(project: Project, spec: VersionSpec): string {
+  validateSuite(project);
+  assert(spec.implementations.length > 0, 'Version spec needs at least one implementation');
+  const ids = new Set<number>();
+  const prefixes = new Set<string>();
+  const modules = spec.implementations.map(item => {
+    validateUint32(item.implementation_id, `implementation ${item.implementation_id}`);
+    assert(!ids.has(item.implementation_id), `Duplicate implementation id: ${item.implementation_id}`);
+    ids.add(item.implementation_id);
+    validateModule(item.module, project);
+    assert(!prefixes.has(item.module.symbol_prefix), `Duplicate module symbol prefix: ${item.module.symbol_prefix}`);
+    prefixes.add(item.module.symbol_prefix);
+    return item.module;
+  });
+  const moduleById = new Map(spec.implementations.map(item => [item.implementation_id, item.module]));
+  const ruleIds = new Set<number>();
+  const routedCases = new Set<string>();
+  for (const rule of spec.routes) {
+    assert(moduleById.has(rule.implementation_id), `Route references unknown implementation ${rule.implementation_id}`);
+    validateUint32(rule.rule_id, `route rule ${rule.rule_id}`);
+    assert(!ruleIds.has(rule.rule_id), `Duplicate route rule id: ${rule.rule_id}`);
+    ruleIds.add(rule.rule_id);
+    assert(rule.case_ids && rule.case_ids.length > 0, `Route rule ${rule.rule_id} must route explicit measured case_ids`);
+    const module = moduleById.get(rule.implementation_id)!;
+    const supported = new Set(module.supported_case_ids);
+    for (const caseId of rule.case_ids) {
+      assert(supported.has(caseId), `Route rule ${rule.rule_id} sends untested or unsupported case ${caseId} to ${module.kernel_id}@${module.revision}`);
+      assert(!routedCases.has(caseId), `Duplicate or overlapping route for case ${caseId}`);
+      routedCases.add(caseId);
+    }
+  }
+  const deps = emitDependencies(project, modules);
+  const bucketTable = spec.routes.map(rule =>
+    `METEOR_BUCKET(${rule.rule_id}U, ${rule.implementation_id}U, "${rule.case_ids?.join(',') ?? 'shape'}")`
+  ).join('\n    ');
+  const routeSelect = spec.routes.map(rule =>
+    `if (${conditionFor(rule, project)}) { return {${rule.rule_id}U, ${rule.implementation_id}U}; }`
+  ).join('\n    ');
+  const implementationTable = spec.implementations.map(item =>
+    `METEOR_IMPLEMENTATION(${item.implementation_id}U, ${item.module.launcher}, "${item.module.kernel_id}@${item.module.revision}")`
+  ).join('\n');
+  const template = readVersionTemplate(project);
+  return renderSlots(template, {
+    ASSEMBLY_KEY: spec.assembly_key,
+    DEPENDENCY_PREAMBLE: deps.preamble,
+    SHARED_CODE: deps.shared,
+    HOST_CONTEXT_HELPERS: spec.host_context_helpers ?? readPinnedHostContext(project),
+    KERNEL_DEVICE_CODE: modules.map(module => moduleDevice(project, module)).join('\n\n'),
+    KERNEL_HOST_LAUNCHERS: modules.map(module => moduleHost(project, module)).join('\n\n'),
+    IMPLEMENTATION_TABLE: implementationTable,
+    BUCKET_TABLE: bucketTable,
+    ROUTE_FUNCTION_BODY: routeSelect,
+  });
+}
+
+export function defaultTemplatePath(root: string): string {
+  return join(root, 'asc');
+}
