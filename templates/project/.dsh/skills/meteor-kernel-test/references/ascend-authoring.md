@@ -31,6 +31,8 @@ __global__ __vector__ __aicore__ void entry(/* device arguments */);
 
 对要求 nearest-even 的量化，`CAST_RINT` 与 `CAST_ROUND` 不等价；截断或简单加 0.5 也不满足所有边界。8.5 文档的标量 API 名为 `ScalarCast`，当前 9.0 页面为标量 `Cast`，以实际工具链签名为准；不要把版本差异当成“没有办法舍入”。保留逐阶段 FP32 运算，检查半整数、零行和饱和边界，随后完成固定全尺寸测试。[Round][round]、[8.5 ScalarCast][scalar-cast]、[9.0 标量转换][cast]
 
+舍入、零值分支、饱和和运算顺序由公式规定。实现这些语义后用 case 检验；不能先查看固定输入是否恰好出现半整数，再据此省略 RNE 或换成近似算法。固定 suite 是验证样本，不定义公式允许的全部输入。明确实现边界时按 shape、dtype、布局或有依据的资源约束声明支持域，不能按特定输入值挑选通过路径。
+
 每个 AIC/AIV 的 DataCache 独立；标量 GM 写入可能只把本核 cache line 标成 dirty。不同核即使写不同元素，也可能共享同一 cache line。需要根据本机支持的缓存 API、输出布局和核分工保证写回与所有权；或采用 LocalTensor 输出、正确的流水同步和 DataCopy。先把正确数据流做通，再用对照实验验证并行优化。不要将所有输出失败归因于测试器。[9.0 标量访存和同步][scalar-memory]、[官方 Add 示例][add]
 
 `volatile` 不能代替脏数据写回、缓存失效或核间同步。官方缓存接口的示例 3 展示了两个核修改同一 64B cache line 中不同元素、各自刷新却相互覆盖的情况；“每个核都调用刷新”仍不保证正确。检查实际字节地址、对齐和缓存行写入所有权；用单写入者等对照隔离并发影响，再验证目标设备支持的写回路径。NaN/Inf 也可能来自未初始化、越界或数值运算，需要逐输出诊断，不能预定缓存为根因。[缓存控制及反例][cache-control]、[volatile 与同步示例][store-barrier]

@@ -1,0 +1,10 @@
+BEGIN IMMEDIATE;
+ALTER TABLE knowledge_claims ADD COLUMN scope_level TEXT NOT NULL DEFAULT 'dtype' CHECK(scope_level IN ('hardware', 'op', 'dtype', 'shape'));
+ALTER TABLE knowledge_claims ADD COLUMN shape_range TEXT;
+ALTER TABLE knowledge_claims ADD COLUMN knowledge_ref TEXT;
+UPDATE knowledge_claims SET scope_level = 'hardware' WHERE applicability = 'hardware';
+DROP VIEW hardware_knowledge;
+CREATE VIEW hardware_knowledge AS SELECT * FROM knowledge_claims WHERE scope_level = 'hardware';
+CREATE INDEX idx_knowledge_scope ON knowledge_claims(scope_level, target_key);
+UPDATE metadata SET value='3' WHERE key='schema_version';
+COMMIT;

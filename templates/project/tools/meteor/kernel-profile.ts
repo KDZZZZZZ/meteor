@@ -1,10 +1,12 @@
 import { resolve } from 'node:path';
 import type { ProfileReceipt, Project } from './contracts.ts';
-import { experimentDir, loadBuildReceipt, selectRunner, validateBuildStillFresh } from './kernel-build.ts';
+import { buildReceiptPath, experimentDir, loadBuildReceipt, receiptRef, selectRunner, validateBuildStillFresh } from './kernel-build.ts';
 import type { MockFixture } from './runners/contract.ts';
 import { assertResearchActive } from './research.ts';
 import { assert, writeImmutable } from './util.ts';
 import { assertHardwareReady } from './hardware.ts';
+import { isWorkspace, targetPath, targetRef } from './workspace.ts';
+import { assertMigrationIdle } from './legacy.ts';
 
 export interface ProfileKernelInput {
   build_ref: string;
@@ -15,11 +17,13 @@ export interface ProfileKernelInput {
   signal?: AbortSignal;
 }
 
-function profileReceiptPath(project: Project, receipt: ProfileReceipt): string {
+export function profileReceiptPath(project: Project, receipt: ProfileReceipt): string {
+  if (isWorkspace(project)) return targetPath(project, 'measurements', receipt.profile_id, 'receipt.json');
   return resolve(experimentDir(project, receipt.research_id, receipt.experiment_id), 'profiles', `${receipt.profile_id}.json`);
 }
 
 export async function profileKernel(project: Project, input: ProfileKernelInput): Promise<ProfileReceipt> {
+  assertMigrationIdle(project);
   input.signal?.throwIfAborted();
   assert(input.case_ids.length > 0, 'profile requires at least one case_id');
   assert(input.metrics.length > 0, 'profile requires at least one metric');
@@ -46,6 +50,8 @@ export async function profileKernel(project: Project, input: ProfileKernelInput)
     signal: input.signal,
   });
   input.signal?.throwIfAborted();
-  writeImmutable(profileReceiptPath(project, receipt), receipt);
-  return receipt;
+  const result: ProfileReceipt = { ...receipt, ...(targetRef(project) ? { target: targetRef(project) } : {}),
+    build_ref: receiptRef(project, buildReceiptPath(project, build)) };
+  writeImmutable(profileReceiptPath(project, result), result);
+  return result;
 }

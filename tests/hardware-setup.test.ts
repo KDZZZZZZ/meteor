@@ -67,13 +67,13 @@ test('failed probe saves a blocked report and keeps research start disabled', as
   assert.match(String(result.diagnostics), /unit fixture probe failure/);
   const project = loadProject(root);
   assert.equal(project.config.execution.backend, 'unconfigured');
-  assert.equal(project.config.environment.hardware_report_ref?.startsWith('reports/meteor/ssh/hardware/'), true);
+  assert.equal(project.config.environment.hardware_report_ref?.startsWith('hardware/reports/'), true);
   const report = JSON.parse(readFileSync(join(root, project.config.environment.hardware_report_ref!), 'utf8'));
   assert.equal(report.result.readiness, 'BLOCKED');
   assert.throws(() => startResearch(root), /Device setup required/);
 });
 
-test('successful stub probe binds a ready hardware report before research can start', async t => {
+test('successful stub probe binds the device but execution model preparation still gates research', async t => {
   const root = tempRoot(t);
   initProject(root, { git: false });
   materializeUnitCaseSuite(root);
@@ -89,8 +89,8 @@ test('successful stub probe binds a ready hardware report before research can st
   assert.equal(project.config.environment.profile_hash, profile.profileHash);
   assert.equal(project.config.environment.npu_arch, 'dav-2201');
   assert.ok(project.config.environment.hardware_report_ref);
-  const record = startResearch(root);
-  assert.equal(record.execution_backend, 'ssh');
+  assert.equal(result.research_ready, false);
+  assert.throws(() => startResearch(root), /Hardware execution model required/);
 });
 
 test('chief repairs to the project transport are used by the next hardware probe', async t => {
@@ -105,6 +105,27 @@ test('chief repairs to the project transport are used by the next hardware probe
     const result = await probeHardware(root);
     assert.equal(result.state, 'setup_required');
     assert.equal(result.diagnostics, revision);
+  }
+});
+
+test('hardware probe prepares one shared device for every registered target', async t => {
+  const root = tempRoot(t);
+  initProject(root, { git: false });
+  materializeUnitCaseSuite(root);
+  const configPath = join(root, 'meteor.config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  config.targets.push({ ...config.targets[0], op_id: 'qmq-second' });
+  writeJson(configPath, config);
+  installHardwareProfile(t, root);
+  installFakeHardwareSsh(t, readyHardwareResult());
+
+  const result = await probeHardware(root);
+
+  assert.equal(result.state, 'ready_ssh');
+  assert.equal(result.case_setup.targets.length, 2);
+  for (const target of config.targets) {
+    const project = loadProject(root, target);
+    assert.equal(project.config.environment.hardware_report_ref, result.hardware_report_ref);
   }
 });
 
@@ -178,7 +199,7 @@ test('ready hardware without a pinned case suite is still setup-required for eve
   const initialized = initProject(root, { git: false });
   assert.equal(initialized.state, 'setup_required');
   assert.equal(initialized.execution_backend, 'ssh');
-  assert.equal(initialized.hardware_report_ref?.startsWith('reports/meteor/ssh/hardware/'), true);
+  assert.equal(initialized.hardware_report_ref?.startsWith('hardware/reports/'), true);
 });
 
 

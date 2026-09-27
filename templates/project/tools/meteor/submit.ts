@@ -1,8 +1,12 @@
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import type { AssignedHypothesis, BuildReceipt, Case, Hypothesis, KernelSubmission, ProfileReceipt, Project, ResearchRecord, Submission, TestReceipt } from './contracts.ts';
 import { buildReceiptPath, experimentDir, validateBuildStillFresh } from './kernel-build.ts';
+import { testReceiptPath } from './kernel-test.ts';
+import { profileReceiptPath } from './kernel-profile.ts';
+import { assertTarget, isWorkspace, targetPath, targetRef } from './workspace.ts';
 import { hasDeviceExecution } from './device-evidence.ts';
+import { normalizeKnowledgeScope } from './knowledge-scope.ts';
 import { hashObject, inside, readJson, safeId, writeImmutable, writeJson } from './util.ts';
 import {
   type CommitEnvelope,
@@ -61,6 +65,8 @@ export interface ResearchCommitReport {
   submitted_kernel_evidence: Array<{
     kernel_id: string;
     revision: string;
+    verified_case_count: number;
+    recommended_case_count: number;
     full_size_test_ref: string;
     receipt_path: string;
     build_ref: string;
@@ -85,6 +91,8 @@ interface PreparedEnvelope {
 export function prepareSubmission(project: Project, submission: Submission): PreparedSubmission {
   const paths = ensureStore(project);
   const normalized = normalizeSubmission(submission);
+  if (normalized.target) assertTarget(project, normalized.target, 'Submission');
+  if (isWorkspace(project)) normalized.target = targetRef(project);
   validateSubmission(project, normalized);
   const submissionHash = hashObject(normalized);
   const preparedId = `prepared_${submissionHash.slice(0, 24)}`;
@@ -150,6 +158,7 @@ export function commitSubmission(project: Project, preparedId: string, sessionId
     report_ref: reportRef,
   };
   const event = {
+    ...(targetRef(project) ? { target: targetRef(project) } : {}),
     integration_event_id: eventId,
     submission_id: submissionId,
     submission_hash: prepared.submission_hash,
@@ -247,6 +256,8 @@ function kernelEvidenceChain(project: Project, kernel: KernelSubmission): Resear
   return {
     kernel_id: kernel.kernel_id,
     revision: kernel.revision,
+    verified_case_count: new Set(kernel.verified_case_ids).size,
+    recommended_case_count: new Set(kernel.recommended_case_ids).size,
     full_size_test_ref: kernel.full_size_test_ref,
     receipt_path: receiptPath,
     build_ref: receipt.build_ref,
@@ -302,8 +313,10 @@ function isMock(project: Project, submission: Submission): boolean {
 }
 
 function validateSubmission(project: Project, submission: Submission): void {
+  assertTarget(project, submission.target, 'Submission');
   const issues: SubmissionIssue[] = [];
   const record = readResearchManifest<ResearchRecord>(project, submission.research_id);
+  if (record) assertTarget(project, record.target, 'Research manifest');
   requiredString(issues, 'research_id', submission.research_id);
   requiredString(issues, 'agent_session_id', submission.agent_session_id);
   if (!record) issue(issues, 'research_id', 'UNKNOWN_RESEARCH', 'research manifest is required before submission');
@@ -443,7 +456,8 @@ function validateHypothesisEvidence(project: Project, submission: Submission, is
     }
   });
   if (!hasMeasurement) {
-    issue(issues, `hypothesis.${key}`, 'MISSING_REAL_MEASUREMENT', 'a real conclusion requires valid measured test or profile evidence from this research');
+    issue(issues, `hypothesis.${key}`, 'MISSING_REAL_MEASUREMENT',
+      `No valid measured test or profile evidence from this research was resolved. In hypothesis.${key}, use an exact test_ref/performance_data_ref/profile_ref path or an exact experiment_id whose full_size_test_refs/profile_refs list those receipts. Paths embedded in prose are not resolved; put explanations in experiments[].analysis. Valid probe receipts are accepted for a zero-kernel conclusion. If measurements already exist, fix their references and any reported identity/validity errors before scheduling more experiments; a new full test or profile is not required solely to fix reference formatting.`);
   }
 }
 
@@ -460,11 +474,11 @@ function validateProfileEvidence(project: Project, researchId: string, ref: stri
     || receipt.observations.some(row => !validObservation(row))) {
     issue(issues, path, 'INVALID_PROFILE', 'profile evidence requires actual observations for known cases');
   }
-  // ProfileReceipt has no build_ref, so match its pinned source and revision to
-  // a completed build in the same tool-owned experiment directory.
+  // New profiles link the exact build; legacy profiles retain their original lookup.
   const builds = join(experimentDir(project, receipt.research_id, receipt.experiment_id), 'builds');
+  const buildRefs = receipt.build_ref ? [resolveEvidenceRef(project, receipt.build_ref)] : isWorkspace(project) ? [] : listJsonFiles(builds);
   let matchingKernelPrefix: string | undefined;
-  const hasBuild = listJsonFiles(builds).some(buildRef => {
+  const hasBuild = buildRefs.some(buildRef => {
     const build = readJson<BuildReceipt>(buildRef);
     if (build.status !== 'COMPLETED' || !build.artifact_hash || build.experiment_id !== receipt.experiment_id
       || build.source_hash !== receipt.source_hash || build.kernel_ref?.kernel_id !== receipt.kernel_ref?.kernel_id
@@ -545,6 +559,12 @@ function validateKnowledge(submission: Submission, issues: SubmissionIssue[]): v
     return;
   }
   submission.knowledge_updates.forEach((claim, index) => {
+    try { normalizeKnowledgeScope(claim); }
+    catch (error) { issue(issues, `knowledge_updates.${index}`, 'INVALID_KNOWLEDGE_SCOPE', (error as Error).message); }
+    if (claim.category !== undefined && !['research', 'prediction_rule', 'ir_technique'].includes(claim.category))
+      issue(issues, `knowledge_updates.${index}.category`, 'INVALID_CATEGORY', 'knowledge category must be research, prediction_rule or ir_technique');
+    if (claim.applicability !== undefined && !['target', 'hardware'].includes(claim.applicability))
+      issue(issues, `knowledge_updates.${index}.applicability`, 'INVALID_APPLICABILITY', 'knowledge applicability must be target or hardware');
     requiredString(issues, `knowledge_updates.${index}.claim_id`, claim.claim_id);
     requiredString(issues, `knowledge_updates.${index}.kind`, claim.kind);
     requiredString(issues, `knowledge_updates.${index}.statement`, claim.statement);
@@ -592,15 +612,16 @@ function validateKernelSubmission(project: Project, researchId: string, kernel: 
 type ExperimentReceipt = BuildReceipt | TestReceipt | ProfileReceipt;
 
 function validateEvidenceOrigin(project: Project, researchId: string, ref: string, receipt: ExperimentReceipt, path: string, issues: SubmissionIssue[]): void {
+  try { assertTarget(project, receipt.target, 'Evidence'); }
+  catch (error) { issue(issues, `${path}.target`, 'TARGET_MISMATCH', (error as Error).message); }
   if (receipt.research_id !== researchId) issue(issues, `${path}.research_id`, 'RESEARCH_MISMATCH', 'experiment evidence must belong to the submitting research');
   if (receipt.execution_backend !== project.config.execution.backend) issue(issues, `${path}.execution_backend`, 'BACKEND_MISMATCH', 'evidence backend must match project backend');
   if (receipt.environment_ref !== project.config.environment.environment_ref) issue(issues, `${path}.environment_ref`, 'STALE_ENVIRONMENT', 'evidence environment must match project environment');
   if (receipt.simulated !== (project.config.execution.backend === 'mock')) issue(issues, `${path}.simulated`, 'SIMULATION_MISMATCH', 'evidence must carry the correct explicit simulation flag');
   try {
-    const dir = experimentDir(project, receipt.research_id, receipt.experiment_id);
-    const expected = 'run_id' in receipt ? join(dir, 'full-tests', `${safeId(receipt.run_id)}.json`)
+    const expected = 'run_id' in receipt ? testReceiptPath(project, { ...receipt, run_id: safeId(receipt.run_id) })
       : 'build_id' in receipt ? buildReceiptPath(project, { ...receipt, build_id: safeId(receipt.build_id) })
-        : join(dir, 'profiles', `${safeId(receipt.profile_id)}.json`);
+        : profileReceiptPath(project, { ...receipt, profile_id: safeId(receipt.profile_id) });
     // Resolve the data root once so symlinks inside evidence storage cannot turn
     // an agent-writable draft into an apparently tool-owned receipt.
     const expectedPhysical = join(realpathSync(project.dataRoot), relative(resolve(project.dataRoot), expected));
@@ -656,6 +677,84 @@ function validateKernelArtifact(project: Project, kernel: KernelSubmission, buil
   }
 }
 
+interface SavedComparison {
+  value?: {
+    design_ref?: string;
+    evidence?: Array<{ receipt_ref?: string; content_hash?: string; kind?: string; receipt?: any }>;
+    analysis?: { matched?: unknown[]; deviations?: unknown[]; unknown?: unknown[] };
+    analysis_kind?: string;
+    simulated?: boolean;
+  };
+  content_hash?: string;
+}
+
+function designIdFromRef(project: Project, designRef: string): string {
+  return safeId(basename(dirname(inside(project.root, designRef))));
+}
+
+function hasAuthorAnalysis(comparison: NonNullable<SavedComparison['value']>): boolean {
+  if (comparison.analysis_kind !== 'author_interpretation') return false;
+  const analysis = comparison.analysis;
+  if (!analysis) return false;
+  const fields = [analysis.matched, analysis.deviations, analysis.unknown];
+  return fields.every(items => Array.isArray(items) && items.every(item => typeof item === 'string'))
+    && fields.some(items => Array.isArray(items) && items.length > 0);
+}
+
+function comparisonMentionsExactBuild(project: Project, comparison: NonNullable<SavedComparison['value']>, build: BuildReceipt): boolean {
+  const buildPath = realpathSync(resolveEvidenceRef(project, buildReceiptPath(project, build)));
+  return Array.isArray(comparison.evidence) && comparison.evidence.some(entry => {
+    if (entry.kind !== 'test' && entry.kind !== 'profile') return false;
+    try {
+      const receiptPath = resolveEvidenceRef(project, entry.receipt_ref ?? '');
+      const receipt = readJson<any>(receiptPath);
+      if (entry.content_hash !== hashObject(receipt)) return false;
+      if (entry.receipt && hashObject(entry.receipt) !== hashObject(receipt)) return false;
+      const originIssues: SubmissionIssue[] = [];
+      validateEvidenceOrigin(project, build.research_id, entry.receipt_ref ?? '', receipt, 'comparison.evidence', originIssues);
+      if (originIssues.length) return false;
+      if (receipt.research_id !== build.research_id || receipt.experiment_id !== build.experiment_id) return false;
+      if (receipt.kernel_ref?.kernel_id !== build.kernel_ref.kernel_id || receipt.kernel_ref?.revision !== build.kernel_ref.revision) return false;
+      if (receipt.execution_backend !== build.execution_backend || receipt.environment_ref !== build.environment_ref) return false;
+      if (receipt.simulated !== build.simulated || receipt.source_hash !== build.source_hash) return false;
+      return realpathSync(resolveEvidenceRef(project, receipt.build_ref)) === buildPath;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function hasCanonicalDesignComparison(project: Project, researchId: string, build: BuildReceipt): boolean {
+  if (project.config.execution.backend !== 'ssh' || !build.design_ref) return true;
+  let root: string;
+  try {
+    root = targetPath(project, 'comparisons', safeId(researchId), designIdFromRef(project, build.design_ref));
+  } catch {
+    return false;
+  }
+  if (!existsSync(root)) return false;
+  return listJsonFiles(root).some(path => {
+    try {
+      const stored = readJson<SavedComparison>(path);
+      const comparison = stored.value;
+      if (!comparison || stored.content_hash !== hashObject(comparison)) return false;
+      if (basename(path) !== `${hashObject(comparison)}.json`) return false;
+      if (comparison.design_ref !== build.design_ref || comparison.simulated !== false) return false;
+      if (!hasAuthorAnalysis(comparison)) return false;
+      return comparisonMentionsExactBuild(project, comparison, build);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function validateDesignComparison(project: Project, researchId: string, build: BuildReceipt, path: string, issues: SubmissionIssue[]): void {
+  if (project.config.execution.backend !== 'ssh' || !build.design_ref) return;
+  if (hasCanonicalDesignComparison(project, researchId, build)) return;
+  issue(issues, `${path}.design_comparison`, 'MISSING_DESIGN_COMPARISON',
+    'submitted SSH kernels built with design_ref require an intact prior meteor_design compare artifact for the same research, design and exact build, with test/profile receipt evidence and author analysis. Call meteor_design with action "compare", the build design_ref, and existing test/profile receipt_refs from this same session; no new hardware run or per-activity timing is required, and budget expiry should not stop comparing existing receipts.');
+}
+
 function validateTestEvidence(project: Project, researchId: string, ref: string, receipt: TestReceipt, path: string, issues: SubmissionIssue[]): BuildReceipt | undefined {
   validateEvidenceOrigin(project, researchId, ref, receipt, path, issues);
   const build = validateLinkedBuild(project, researchId, receipt, `${path}.build_ref`, issues);
@@ -694,7 +793,10 @@ function validateTestEvidence(project: Project, researchId: string, ref: string,
 
 function validateFullReceipt(project: Project, researchId: string, kernel: KernelSubmission, receipt: TestReceipt, path: string, issues: SubmissionIssue[]): void {
   const build = validateTestEvidence(project, researchId, kernel.full_size_test_ref, receipt, `${path}.full_size_test_ref`, issues);
-  if (build) validateKernelArtifact(project, kernel, build, path, issues);
+  if (build) {
+    validateKernelArtifact(project, kernel, build, path, issues);
+    validateDesignComparison(project, researchId, build, path, issues);
+  }
   if (receipt.mode !== 'full') issue(issues, `${path}.full_size_test_ref.mode`, 'NOT_FULL', 'submitted kernel receipt must be full mode');
   if (receipt.kernel_ref?.kernel_id !== kernel.kernel_id || receipt.kernel_ref?.revision !== kernel.revision) {
     issue(issues, `${path}.full_size_test_ref.kernel_ref`, 'KERNEL_MISMATCH', 'receipt must measure the exact submitted kernel revision');

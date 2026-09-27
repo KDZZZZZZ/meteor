@@ -5,6 +5,8 @@ import type { MockFixture, TestMode } from './runners/contract.ts';
 import type { Project } from './contracts.ts';
 import { assertResearchActive } from './research.ts';
 import { hashObject, writeImmutable } from './util.ts';
+import { isWorkspace, targetPath, targetRef } from './workspace.ts';
+import { assertMigrationIdle } from './legacy.ts';
 
 export interface TestKernelInput {
   build_ref: string;
@@ -15,11 +17,13 @@ export interface TestKernelInput {
   signal?: AbortSignal;
 }
 
-function testReceiptPath(project: Project, receipt: TestReceipt): string {
+export function testReceiptPath(project: Project, receipt: TestReceipt): string {
+  if (isWorkspace(project)) return targetPath(project, 'measurements', receipt.run_id, 'receipt.json');
   return resolve(experimentDir(project, receipt.research_id, receipt.experiment_id), 'full-tests', `${receipt.run_id}.json`);
 }
 
 export async function testKernel(project: Project, input: TestKernelInput): Promise<TestReceipt> {
+  assertMigrationIdle(project);
   input.signal?.throwIfAborted();
   const build = loadBuildReceipt(project, input.build_ref);
   assertResearchActive(project, build.research_id, build.experiment_id);
@@ -38,6 +42,7 @@ export async function testKernel(project: Project, input: TestKernelInput): Prom
   const path = testReceiptPath(project, receipt);
   const projectRelativeReceipt: TestReceipt = {
     ...receipt,
+    ...(targetRef(project) ? { target: targetRef(project) } : {}),
     build_ref: receiptRef(project, buildReceiptPath(project, build)),
     data_hash: hashObject(receipt.rows),
   };

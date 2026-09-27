@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Hypothesis-driven kernel research for DeepSeek Harness",
   "exports": "./dist/src/index.js",
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "bin": { "meteor": "./dist/src/cli.js" },
   "files": ["dist", "cordis.patch.yml", "README.md", "docs"],
   "engines": { "node": ">=24.0.0" },

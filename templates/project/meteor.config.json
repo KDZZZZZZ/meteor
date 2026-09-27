@@ -1,7 +1,16 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "workspace": { "workspace_id": "assigned-at-init", "hardware_ref": "hardware/target.json" },
+  "targets": [{
+    "op_id": "qmq-v1", "dtype_id": "int8", "operator_abi": "qmq-v1",
+    "contract_ref": "contracts/qmq-v1/int8/operator.json",
+    "oracle_ref": "tools/meteor/runners/remote/verify_case.py",
+    "adapter_ref": "contracts/qmq-v1/int8/adapter.json",
+    "template_ref": "templates/qmq-v1/int8",
+    "case_suite_ref": "cases/qmq-v1/int8/default/suite.json"
+  }],
+  "design": { "strategy": "layered-ir@1", "options": {} },
   "execution": { "backend": "unconfigured", "profile_ref": "" },
-  "case_suite": "asc/case-suite.json",
   "environment": {
     "environment_ref": "",
     "hardware": "",
@@ -11,5 +20,5 @@
   },
   "sampling": { "epsilon": 0.1, "lambda": 2, "tau_hours": 72, "count": 4 },
   "budget": { "max_experiments": 12, "max_wall_time_seconds": 3600 },
-  "integration": { "min_relative_improvement": 0.02 }
+  "integration": {}
 }

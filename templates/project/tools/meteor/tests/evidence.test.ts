@@ -1,19 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { BuildReceipt, Project, Submission, TestReceipt } from '../contracts.ts';
-import { hashObject, writeJson } from '../util.ts';
+import { hashObject, readJson, writeJson } from '../util.ts';
 import { commitSubmission, prepareSubmission, SubmissionValidationError } from '../submit.ts';
+import { compareDesign } from '../design/service.ts';
 import { processIntegrationEvents } from '../integration-events.ts';
 import { getEvidenceStatus, getIntegrationReport } from '../report.ts';
 import { buildReceiptPath, computeSourceHash, experimentDir, receiptRef } from '../kernel-build.ts';
 import type { KernelModule } from '../contracts.ts';
 import { sampleMaterials } from '../sampling.ts';
 import { claimDbIntegrationEvent, finishDbIntegrationEventWithToken, storePaths } from '../store.ts';
+import { targetPath } from '../workspace.ts';
 
 test('prepare rejects partial, corrupt, and stale full-size receipts', () => {
   const project = makeProject();
@@ -75,6 +77,73 @@ test('prepare freezes submission without scheduling integration', () => {
   const status = getEvidenceStatus(project, submission.research_id);
   assert.equal(status.integration_events.length, 0);
   assert.equal(status.prepared_submissions, 1);
+});
+
+test('ssh design builds require comparison before formal kernel submission', () => {
+  const project = makeProject('ssh');
+  const receipt = makeReceipt(project, 'k_design_gate', 'r1', [10, 10]);
+  const designRef = attachDesign(project, receipt);
+  const receiptPath = writeReceipt(project, 'design-gate.json', receipt);
+  const submission = makeSubmission(project, { kernelId: 'k_design_gate', revision: 'r1', receiptPath, receipt });
+
+  assert.throws(
+    () => prepareSubmission(project, submission),
+    (error: unknown) => error instanceof SubmissionValidationError
+      && error.issues.some(issue => issue.code === 'MISSING_DESIGN_COMPARISON'
+        && /existing test\/profile receipt_refs/.test(issue.message)
+        && /no new hardware run/.test(issue.message)),
+  );
+
+  const probeRef = writeProbeReceipt(project, receipt, 'design-gate-probe.json');
+  expireResearch(project);
+  compareDesign(project, { research_id: 'research_1', design_ref: designRef, receipt_refs: [probeRef],
+    analysis: { matched: ['probe receipt belongs to the exact submitted build'], deviations: [], unknown: ['per-activity timing was not collected'] } });
+  const prepared = prepareSubmission(project, submission);
+  const report = commitSubmission(project, prepared.prepared_submission_id, submission.agent_session_id);
+  assert.equal(report.submitted_kernel_count, 1);
+});
+
+test('commit rechecks design comparison integrity and exact build identity', () => {
+  for (const mode of ['removed', 'corrupted', 'foreign', 'wrong-name', 'wrong-measurement'] as const) {
+    const project = makeProject('ssh');
+    const receipt = makeReceipt(project, `k_${mode}`, 'r1', [10, 10]);
+    const designRef = attachDesign(project, receipt);
+    const receiptPath = writeReceipt(project, `${mode}.json`, receipt);
+    const probeRef = writeProbeReceipt(project, receipt, `${mode}-probe.json`);
+    const comparison = compareDesign(project, { research_id: 'research_1', design_ref: designRef, receipt_refs: [probeRef],
+      analysis: { matched: ['probe receipt belongs to the exact submitted build'], deviations: [], unknown: ['per-activity timing was not collected'] } });
+    const submission = makeSubmission(project, { kernelId: `k_${mode}`, revision: 'r1', receiptPath, receipt });
+    const prepared = prepareSubmission(project, submission);
+    const comparisonPath = join(project.root, comparison.comparison_ref);
+
+    if (mode === 'removed') rmSync(comparisonPath);
+    else {
+      const stored = readJson<any>(comparisonPath);
+      if (mode === 'corrupted') writeJson(comparisonPath, { ...stored, content_hash: 'not-the-canonical-hash' });
+      else if (mode === 'foreign') {
+        stored.value.design_ref = 'ir/research_1/foreign/design.json';
+        rewriteComparison(comparisonPath, stored.value);
+      } else if (mode === 'wrong-name') {
+        rmSync(comparisonPath);
+        writeJson(join(dirname(comparisonPath), 'wrong-name.json'), stored);
+      } else {
+        const other = makeReceipt(project, `k_${mode}_other`, 'r1', [20, 20]);
+        attachDesign(project, other);
+        const otherProbeRef = writeProbeReceipt(project, other, `${mode}-other-probe.json`);
+        const otherProbe = readJson(otherProbeRef);
+        stored.value.evidence[0] = { ...stored.value.evidence[0], receipt_ref: otherProbeRef,
+          content_hash: hashObject(otherProbe), receipt: otherProbe };
+        rewriteComparison(comparisonPath, stored.value);
+      }
+    }
+
+    assert.throws(
+      () => commitSubmission(project, prepared.prepared_submission_id, submission.agent_session_id),
+      (error: unknown) => error instanceof SubmissionValidationError
+        && error.issues.some(issue => issue.code === 'MISSING_DESIGN_COMPARISON'),
+      mode,
+    );
+  }
 });
 
 test('commit and event processing are idempotent', async () => {
@@ -193,10 +262,11 @@ function makeProject(backend: 'mock' | 'ssh' = 'mock', root = mkdtempSync(join(t
       ],
     },
   };
-  const templateRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'asc');
+  const templateRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'templates', 'qmq-v1', 'int8');
   mkdirSync(join(root, 'asc'), { recursive: true });
   copyFileSync(join(templateRoot, 'version.asc.tmpl'), join(root, 'asc', 'version.asc.tmpl'));
   copyFileSync(join(templateRoot, 'host_context.asc.inc'), join(root, 'asc', 'host_context.asc.inc'));
+  writeJson(join(root, 'asc', 'operator.json'), { inputs: { x: 'int8' }, outputs: { y: 'int8' }, semantics: ['fixture'] });
   writeJson(join(dataRoot, 'research', 'research_1', 'manifest.json'), {
     research_id: 'research_1',
     agent_session_id: 'session_1',
@@ -235,6 +305,8 @@ function makeReceipt(project: Project, kernelId: string, revision: string, media
     source_hash: sourceHash,
     input_hash: testCase.input_hash,
     oracle_hash: testCase.oracle_hash,
+    ...(project.config.execution.backend === 'ssh' ? { device_execution: { status: 'CONFIRMED' as const,
+      matched_tasks: [{ device_id: 0, task_type: 'AI_CORE', op_name: `${kernelId}_${revision}_kernel` }] } } : {}),
   }));
   const receipt: TestReceipt = {
     run_id: `run_${kernelId}_${revision}`,
@@ -266,6 +338,69 @@ function writeReceipt(project: Project, name: string, receipt: TestReceipt): str
   const stored = { ...receipt, run_id: receipt.run_id + '_' + name.replace(/\.json$/, '') };
   const path = join(experimentDir(project, stored.research_id, stored.experiment_id), 'full-tests', stored.run_id + '.json');
   writeJson(path, stored);
+  return path;
+}
+
+function expireResearch(project: Project): void {
+  const path = join(project.dataRoot, 'research', 'research_1', 'manifest.json');
+  const record = readJson<any>(path);
+  writeJson(path, { ...record, created_at: '2000-01-01T00:00:00.000Z', budget: { ...record.budget, max_wall_time_seconds: 1 } });
+}
+
+function projectRef(project: Project, path: string): string {
+  return relative(project.root, path).replaceAll('\\', '/');
+}
+
+function writeDesignArtifact(path: string, value: unknown): void {
+  writeJson(path, { value, content_hash: hashObject(value) });
+}
+
+function rewriteComparison(previousPath: string, value: unknown): string {
+  const nextPath = join(dirname(previousPath), `${hashObject(value)}.json`);
+  if (nextPath !== previousPath) rmSync(previousPath);
+  writeJson(nextPath, { value, content_hash: hashObject(value) });
+  return nextPath;
+}
+
+function attachDesign(project: Project, receipt: TestReceipt): string {
+  const buildPath = join(project.root, receipt.build_ref);
+  const build = readJson<BuildReceipt>(buildPath);
+  const module = readJson<KernelModule>(join(project.root, build.module_ref));
+  const designId = `design_${build.kernel_ref.kernel_id}_${build.kernel_ref.revision}`;
+  const designPath = targetPath(project, 'ir', build.research_id, designId, 'design.json');
+  const designRef = projectRef(project, designPath);
+  const formulaPath = join(project.root, 'asc', 'operator.json');
+  const design = {
+    schema_version: 1,
+    design_id: designId,
+    research_id: build.research_id,
+    experiment_id: build.experiment_id,
+    strategy: 'layered-ir@1',
+    kernel_path: build.source_ref,
+    kernel_ref: build.kernel_ref,
+    module_hash: hashObject(module),
+    formula_ref: projectRef(project, formulaPath),
+    formula_hash: hashObject(readJson(formulaPath)),
+    environment_ref: build.environment_ref,
+    case_suite_revision: project.suite.revision,
+  };
+  writeDesignArtifact(designPath, design);
+  writeDesignArtifact(join(dirname(designPath), 'frozen.json'), { status: 'READY', source_hash: build.source_hash });
+  writeJson(buildPath, { ...build, design_ref: designRef });
+  return designRef;
+}
+
+function writeProbeReceipt(project: Project, receipt: TestReceipt, name: string): string {
+  const probe: TestReceipt = {
+    ...receipt,
+    run_id: receipt.run_id + '_' + name.replace(/\.json$/, ''),
+    mode: 'probe',
+    rows: receipt.rows.slice(0, 1),
+    accounting_complete: false,
+  };
+  probe.data_hash = hashObject(probe.rows);
+  const path = join(experimentDir(project, probe.research_id, probe.experiment_id), 'full-tests', probe.run_id + '.json');
+  writeJson(path, probe);
   return path;
 }
 

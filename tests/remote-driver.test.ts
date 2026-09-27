@@ -44,6 +44,113 @@ function runDriver(request: Record<string, unknown>, env: Record<string, string>
   return { proc, parsed };
 }
 
+test('remote command timeout returns durable queue failure on first response and preserves uncertain release', () => {
+  const root = mkdtempSync(join(tmpdir(), 'meteor-remote-timeout-'));
+  const script = `import contextlib,io,json,os,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1]); import driver
+os.environ['METEOR_REMOTE_DRIVER_ALLOW_NON_POSIX_ROOT']='1'
+root=Path(sys.argv[2])
+request={'action':'test','request_id':'timeout','remote_root':str(root),'queue_root':str(root/'queue')}
+calls=[]
+def timeout_handler(*_):
+ calls.append('timeout')
+ driver.run_command([sys.executable,'-c','import time; time.sleep(30)'],root,timeout=0.05)
+driver.action_test=timeout_handler
+def invoke(payload):
+ driver.load_stdin=lambda:dict(payload)
+ output=io.StringIO()
+ with contextlib.redirect_stdout(output): code=driver.main()
+ return code,json.loads(output.getvalue())
+code,envelope=invoke(request)
+assert code==1 and envelope['ok'] is False
+result=envelope['result']
+assert result['status']=='FAILED' and result['remote_release_confirmed'] is True
+assert result['queue']['capacity']==1 and result['queue']['started_at']<=result['finished_at']
+assert 'timed out' in result['error']
+stored=json.loads((root/'requests/timeout/result.json').read_text())
+assert stored==result
+assert driver.dispatch(dict(request))==stored and calls==['timeout']
+assert driver.dispatch({**request,'action':'collect'})==stored
+driver.action_test=lambda *_:{'status':'COMPLETED','backend':'ssh','simulated':False}
+following=driver.dispatch({**request,'request_id':'after-timeout'})
+assert following['queue']['ticket']>result['queue']['ticket']
+assert following['queue']['started_at']>=result['finished_at']
+assert following['remote_release_confirmed'] is True
+driver.action_test=timeout_handler
+driver.ExecutionQueue.released=lambda self:False
+code,uncertain=invoke({**request,'request_id':'uncertain'})
+assert code==1 and uncertain['result']['status']=='UNKNOWN_REMOTE'
+assert uncertain['result']['remote_release_confirmed'] is False
+assert uncertain['result']['failed_command']['timeout_seconds']==0.05
+assert not (root/'requests/uncertain/result.json').exists()
+assert driver.ACTIVE_QUEUE is None
+print(json.dumps({'ok':True}))
+`;
+  const result = spawnSync(python, ['-B', '-c', script, dirname(driver), root], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout).ok, true);
+});
+
+test('remote command timeouts retain phase diagnostics without promoting partial work to PASS', () => {
+  const root = mkdtempSync(join(tmpdir(), 'meteor-timeout-diagnostics-'));
+  const script = `import contextlib,io,json,os,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1]); import driver
+os.environ['METEOR_REMOTE_DRIVER_ALLOW_NON_POSIX_ROOT']='1'
+os.environ.pop('METEOR_REMOTE_DRIVER_FAKE_BUILD',None)
+root=Path(sys.argv[2])
+real_run=driver.run_command
+driver.write_case_files=lambda *_:('input-hash','oracle-hash')
+case={'case_id':'case1','shape':{'m':1,'n':1,'k':1}}
+for stage in ['run','verify','device_witness']:
+ calls=[]
+ def timed_command(cwd):
+  source="import sys,time; print('x'*21000+'progress-"+stage+"',flush=True); print('diagnostic-"+stage+"',file=sys.stderr,flush=True); time.sleep(30)"
+  return real_run([sys.executable,'-u','-c',source],cwd,timeout=1)
+ def run(command,cwd,timeout=900):
+  current='verify' if 'verify_case.py' in str(command) else 'run'
+  calls.append(current)
+  if stage==current: return timed_command(cwd)
+  return {'command':command,'returncode':0,'stdout':'QMQ_TIMING_US sample=0 value=10.0','stderr':'','duration_seconds':0.01}
+ def witness(request,executable,case,case_dir,*_):
+  calls.append('device_witness')
+  return timed_command(case_dir)
+ driver.run_command=run
+ driver.msprof_witness=witness
+ def handler(request,remote_root,request_dir):
+  return driver.execute_case(request,remote_root,root/'candidate',case,0,0,1,request_dir,False)
+ driver.action_test=handler
+ payload={'action':'test','request_id':'timeout-'+stage,'remote_root':str(root),'queue_root':str(root/'queue')}
+ driver.load_stdin=lambda:dict(payload)
+ output=io.StringIO()
+ with contextlib.redirect_stdout(output): code=driver.main()
+ envelope=json.loads(output.getvalue()); result=envelope['result']
+ assert code==1 and envelope['ok'] is False
+ assert result['status']=='FAILED' and result['remote_release_confirmed'] is True
+ context=result['failure_context']; diagnostic=result['failed_command']
+ assert context['case_id']=='case1' and context['stage']==stage
+ assert context['input_hash']=='input-hash' and context['oracle_hash']=='oracle-hash'
+ expected={'run':[],'verify':['run'],'device_witness':['run','verify']}[stage]
+ assert list(context['completed_commands'])==expected
+ assert all(log['returncode']==0 for log in context['completed_commands'].values())
+ assert calls==expected+[stage]
+ assert diagnostic['stdout'].endswith('progress-'+stage+'\\n')
+ assert diagnostic['stderr'].strip()=='diagnostic-'+stage
+ assert len(diagnostic['stdout'])==20000 and diagnostic['timeout_seconds']==1
+ assert diagnostic['duration_seconds']>=1 and diagnostic['returncode']!=0
+ assert 'rows' not in result and 'observations' not in result and 'samples_us' not in result
+ stored=json.loads((root/'requests'/payload['request_id']/'result.json').read_text())
+ assert stored==result
+ assert driver.dispatch({**payload,'action':'collect'})==result
+ assert driver.dispatch(dict(payload))==result and calls==expected+[stage]
+print(json.dumps({'ok':True}))
+`;
+  const result = spawnSync(python, ['-B', '-c', script, dirname(driver), root], { encoding: 'utf8', windowsHide: true, timeout: 20000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout).ok, true);
+});
+
 function makeCase() {
   const x1 = Buffer.from([2]);
   const x2 = Buffer.from([3]);

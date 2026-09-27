@@ -2,24 +2,30 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from './init.ts';
-import { loadProject } from './project.ts';
+import { loadProject, loadWorkspace } from './project.ts';
 import { listResearch } from '../templates/project/tools/meteor/research.ts';
 import { loadSshProfile } from '../templates/project/tools/meteor/profiles.ts';
 import { probeHardware } from './hardware.ts';
+import { migrateProject } from './migrate.ts';
 
 export async function main(args = process.argv.slice(2)) {
   const [command, directory = '.'] = args;
   if (!command || command === '--help' || command === '-h') {
-    console.log('meteor init [directory]\nmeteor hardware [directory] [profile-ref]\nmeteor status [directory]\nmeteor config [directory]\nmeteor profile-check <profile-ref>\n\nResearch is started and managed by chief through the DSH meteor_start tool.');
+    console.log('meteor init [directory]\nmeteor migrate [directory] [--apply]\nmeteor hardware [directory] [profile-ref]\nmeteor status [directory]\nmeteor config [directory]\nmeteor profile-check <profile-ref>\n\nMigration defaults to read-only inspection. Research is started and managed by chief through the DSH meteor_start tool.');
     return;
   }
   let output: unknown;
   if (command === 'init') output = initProject(directory);
+  else if (command === 'migrate') output = await migrateProject(directory, { apply: args.includes('--apply') });
   else if (command === 'hardware') output = await probeHardware(directory, args[2]);
   else if (command === 'status') {
-    const project = loadProject(directory);
-    output = { root: project.root, backend: project.config.execution.backend, research: listResearch(project) };
-  } else if (command === 'config') output = loadProject(directory).config;
+    const config = loadWorkspace(directory);
+    const targets = (config.targets ?? [undefined]).map(target => {
+      const project = loadProject(directory, target);
+      return { target: project.scope, research: listResearch(project) };
+    });
+    output = { root: resolve(directory), backend: config.execution.backend, targets };
+  } else if (command === 'config') output = loadWorkspace(directory);
   else if (command === 'profile-check') {
     if (!args[1]) throw new Error('profile-check requires a profile reference');
     const profile = loadSshProfile(args[1]);

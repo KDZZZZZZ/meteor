@@ -1,6 +1,7 @@
 import type { Project } from './contracts.ts';
 import { loadSshProfile } from './profiles.ts';
-import { assert, hashObject, inside, readJson } from './util.ts';
+import { assert, hashObject, inside, readJson, writeJson } from './util.ts';
+import { isWorkspace } from './workspace.ts';
 import { hasDeviceExecution } from './device-evidence.ts';
 
 export const SSH_MEASUREMENT_PROTOCOL_REF = 'acl-event-us-warmup3-samples5-device-witness-v2';
@@ -53,6 +54,24 @@ export function hardwareReady(result: any): boolean {
     && hasDeviceExecution(check.device_execution, device.device_id);
 }
 
+export function workspaceHardwareIdentity(result: any) {
+  const device = result?.selected_device;
+  assert(device?.soc_version && device?.npu_arch, 'Measured hardware identity is required');
+  return { soc_version: device.soc_version, npu_arch: device.npu_arch };
+}
+
+export function bindWorkspaceHardware(project: Project, result: any, reportRef: string): void {
+  if (!isWorkspace(project)) return;
+  assert(hardwareReady(result), 'Cannot bind unverified hardware');
+  const path = inside(project.root, project.config.workspace!.hardware_ref);
+  const current = readJson(path);
+  const identity = workspaceHardwareIdentity(result);
+  const hardwareId = 'hw-' + hashObject(identity).slice(0, 24);
+  assert(current.state === 'unconfigured' || (current.state === 'bound' && current.hardware_id === hardwareId),
+    'Workspace is bound to a different HW; use a separate workspace for that hardware');
+  writeJson(path, { schema_version: 1, state: 'bound', hardware_id: hardwareId, ...identity, report_ref: reportRef });
+}
+
 export function assertPinnedCaseSuite(project: Project): void {
   assert(project.suite.cases.every(item => item.data_ref && /^[a-f0-9]{64}$/.test(item.input_hash) && /^[a-f0-9]{64}$/.test(item.oracle_hash)),
     'Real research needs pinned case files and oracle hashes. Chief must resolve case_setup from meteor_hardware_probe or configure the fixed suite before starting.');
@@ -66,6 +85,11 @@ export function assertHardwareReady(project: Project): any {
   const report = readJson(inside(project.root, env.hardware_report_ref));
   assert(hashObject(report) === env.hardware_report_hash, 'Hardware report changed; run meteor_hardware_probe again');
   assert(hardwareReady(report.result), 'Hardware validation is not ready; run meteor_hardware_probe');
+  if (isWorkspace(project)) {
+    const binding = readJson(inside(project.root, project.config.workspace!.hardware_ref));
+    assert(binding.state === 'bound' && binding.hardware_id === 'hw-' + hashObject(workspaceHardwareIdentity(report.result)).slice(0, 24),
+      'Measured device does not match this workspace hardware binding');
+  }
   assert(report.profile_ref === project.config.execution.profile_ref && report.profile_hash === env.profile_hash
     && report.profile_hash === hashObject(loadSshProfile(project.config.execution.profile_ref)),
   'SSH profile changed since hardware validation; run meteor_hardware_probe again');

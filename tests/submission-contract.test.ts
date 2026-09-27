@@ -8,7 +8,7 @@ import { initProject } from '../src/init.ts';
 import { loadProject } from '../src/project.ts';
 import type { KernelModule, Submission } from '../templates/project/tools/meteor/contracts.ts';
 import { buildKernel, buildReceiptPath, computeSourceHash, experimentDir, receiptRef } from '../templates/project/tools/meteor/kernel-build.ts';
-import { testKernel } from '../templates/project/tools/meteor/kernel-test.ts';
+import { testKernel, testReceiptPath } from '../templates/project/tools/meteor/kernel-test.ts';
 import { bindResearchSession, createResearch } from '../templates/project/tools/meteor/research.ts';
 import { commitSubmission, prepareSubmission, SubmissionValidationError } from '../templates/project/tools/meteor/submit.ts';
 import { storePaths } from '../templates/project/tools/meteor/store.ts';
@@ -36,10 +36,10 @@ async function setup(t: TestContext) {
   writeJson(join(root, kernelPath, 'kernel.json'), module);
   writeFileSync(join(root, module.device_file), '// contract test kernel\n');
   writeFileSync(join(root, module.host_file), 'MeteorStatus contract_launch(const MeteorCall&, const MeteorShape&, const MeteorResources&) { return MeteorStatus::Success; }\n');
-  const build = await buildKernel(project, { research_id: researchId, experiment_id: 'experiment_contract', kernel_path: kernelPath });
+  const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: researchId, experiment_id: 'experiment_contract', kernel_path: kernelPath });
   const buildRef = receiptRef(project, buildReceiptPath(project, build));
   const receipt = await testKernel(project, { build_ref: buildRef, mode: 'full' });
-  const receiptPath = join(experimentDir(project, researchId, receipt.experiment_id), 'full-tests', receipt.run_id + '.json');
+  const receiptPath = testReceiptPath(project, receipt);
   const receiptRefValue = receiptRef(project, receiptPath);
   const passCases = receipt.rows.filter(row => row.status === 'PASS').map(row => row.case_id);
 
@@ -117,9 +117,17 @@ test('UTF-8 Chinese submission prepares, commits, and imports into knowledge sto
 test('commit report exposes authoritative tested receipt and module chain', async t => {
   const env = await setup(t);
   const submission = env.submission(true);
+  const kernel = submission.submitted_kernels[0];
+  assert(kernel.verified_case_ids.length > 1);
+  kernel.recommended_case_ids = [kernel.verified_case_ids[0]];
+  kernel.recommended_domain = 'Only the first verified case is recommended';
   const prepared = prepareSubmission(env.project, submission);
+  assert.equal(prepared.submitted_kernel_evidence[0].verified_case_count, kernel.verified_case_ids.length);
+  assert.equal(prepared.submitted_kernel_evidence[0].recommended_case_count, 1);
   const report = commitSubmission(env.project, prepared.prepared_submission_id, env.sessionId);
   const evidence = report.submitted_kernel_evidence[0];
+  assert.equal(evidence.verified_case_count, kernel.verified_case_ids.length);
+  assert.equal(evidence.recommended_case_count, 1);
   assert.equal(evidence.full_size_test_ref, env.receiptRefValue);
   assert.equal(evidence.build_ref, env.buildRef);
   assert.equal(evidence.module_ref, env.build.module_ref);

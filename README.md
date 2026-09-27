@@ -2,7 +2,7 @@
 
 DeepSeek Harness plugin for hypothesis-driven Ascend C kernel research.
 
-meteor lets a chief agent initialize a local research workspace, prepare a real SSH device and hardware report, start one continuous research subagent per `research_id`, validate full-size single-kernel evidence, store structured knowledge in SQLite, and automatically assemble a routed version after a valid final submission. Mock execution is reserved for explicitly selected protocol tests.
+meteor lets a chief agent initialize a local research workspace, derive a hardware execution model from official sources and device diagnostics, select assembly templates per op/dtype, start one continuous research subagent per `research_id`, validate full-size single-kernel evidence, and automatically store knowledge and assemble routed versions after valid submissions. Mock execution is reserved for explicitly selected protocol tests.
 
 ## Requirements
 
@@ -20,16 +20,57 @@ node dist/src/cli.js init
 node dist/src/cli.js hardware . my-central-profile
 ```
 
-`init` writes the project template into the current directory with backend `unconfigured`. Replace `my-central-profile` with a configured central SSH profile reference. The CLI form is `meteor hardware [directory] [profile-ref]`; when the profile reference is omitted, it uses the project's configured reference. Inspect the returned hardware report, supported capabilities and setup status before starting research. Missing configuration or a failed device probe leaves the project unready.
+`init` writes the project template with backend `unconfigured`. Replace `my-central-profile` with a configured central SSH profile reference. A successful device probe is the first preparation step. In DSH, Chief loads `meteor-hardware-prepare`, searches version-matched official sources, runs bounded `meteor_hardware_experiment` diagnostics, publishes `meteor_hardware_model`, and explicitly chooses each target's template with `meteor_configure_assembly_template`. New SSH research is gated until all three are ready: device report, execution model and target template. Initialization never invents hardware primitives or silently selects the bundled example.
 
-For a local protocol demonstration only, run `npm run demo`. It explicitly selects mock fixtures and does not require SSH, CANN or an NPU; it does not establish device readiness or hardware performance.
+For a local protocol demonstration only, run `npm run demo`. It exercises the annotation/design gate, two independent full-size mock tests, activity comparisons, submission and automatic routing. It does not require SSH, CANN or an NPU; its placeholder implementations and simulated measurements establish no hardware result.
 
-## DSH Web Loading
+### Workspace Layout
 
-meteor targets DSH **0.1.7-alpha.2**. In DSH Web, load the plugin from this repository build output, then use the registered chief tools:
+Initialization creates schema 2: one hardware binding per repository, with shared tools, persona, skills and knowledge catalog. Operator/dtype targets are registered in `meteor.config.json`; artifacts use `<kind>/<op_id>/<dtype_id>/...`:
+
+The Chief prepares the device, environment and evidence-backed hardware primitives once for the workspace. All research subagents reuse those assets; each subagent composes its own kernel intermediate expressions from the shared primitives. Starting another research freezes references and copies, without repeating device setup or defining a new primitive vocabulary. Assembly templates are reused within their op/dtype target.
+
+```text
+hardware/target.json                    # unconfigured until the real probe succeeds
+hardware/reports/                       # device and toolchain evidence
+hardware/sources/                       # Chief's versioned documentary excerpts
+hardware/experiments/                   # diagnostic requests/results and frozen runtime
+hardware/execution-models/<id>/<hash>.json # immutable model + source evidence
+contracts/qmq-v1/int8/                  # formula and execution adapter
+cases/qmq-v1/int8/default/suite.json     # fixed case suite
+templates/<op>/<dtype>/assembly/        # Chief-selected frozen version templates
+kernels/<op>/<dtype>/                   # exact kernel revisions
+ir/<op>/<dtype>/                        # design/expected/freeze/comparison records
+reports/<op>/<dtype>/                   # research and integration reports
+versions/<op>/<dtype>/                  # route specs and assembled source
+experiments/, builds/, measurements/, comparisons/, research/ # also op/dtype
+knowledge/catalog.sqlite               # shared structured catalog; keys include target
+knowledge/claim_<hash>.json             # HW-global claims
+knowledge/<op>/claim_<hash>.json        # operator-wide claims
+knowledge/<op>/<dtype>/claim_<hash>.json # dtype-shared claims / integration scope
+knowledge/<op>/<dtype>/<shape_id>/claim_<hash>.json # declared inclusive size intervals
+predictors/manifest.json                # shared rules registry, initially empty
+.meteor/state/                         # host bookkeeping
+.meteor/mock/                          # explicit mock artifacts and separate catalog
+```
+
+Shapes remain case metadata and version routing inputs. `meteor_start` accepts `target: {op_id, dtype_id}`; selection is required when more than one target is registered. The first executable adapter is `qmq-v1/int8`; adding arbitrary folders does not provide another operator implementation. Chief probes shared hardware once, then each target uses its own contract, suite and templates. Repeated initialization preserves edited files and reports template differences.
+
+Existing schema 1 instances require `meteor migrate <directory>` for read-only inspection, followed by `--apply` once no research or integration is active. Migration preserves legacy source/receipt locations, writes backups and an evidence inventory, and publishes the new configuration last. `init` will not mix a new runtime into a legacy instance. See the [implementation record](docs/plans/2026-09-26-workspace-implementation.md).
+
+## DSH Desktop / Web Loading
+
+Run `npm run build`, then install this repository's absolute directory through DSH's **Plugins** page. The package declares `dsh.bundle.patch`, so the standard plugin manager can discover and activate it in the selected Desktop or Web profile. Keep research workspaces in separate directories and let Chief initialize them through `meteor_init`.
+
+After rebuilding JavaScript for an already loaded local plugin, finish or cancel its active research jobs through Chief, then restart that DSH Desktop/Web host before validating the update. On Desktop 0.1.7-rc.2, disabling and enabling the bundle remounts it but can retain the previous JavaScript module cache. Existing research keeps its frozen snapshot; validate changed initialization templates in a fresh workspace instead of patching a running experiment.
+
+The native contract tests previously ran against DSH **0.1.7-alpha.2**. Desktop **0.1.7-rc.2** installation and conversational research validation are being checked separately; a successful package installation alone does not establish a successful hardware research run. The registered chief tools are:
 
 - `meteor_init`
 - `meteor_hardware_probe`
+- `meteor_hardware_experiment`
+- `meteor_hardware_model`
+- `meteor_configure_assembly_template`
 - `meteor_start`
 - `meteor_status`
 - `meteor_control`
@@ -37,7 +78,7 @@ meteor targets DSH **0.1.7-alpha.2**. In DSH Web, load the plugin from this repo
 
 The native run starts one spawned research Agent, keeps one session for the whole research loop, registers the two meteor skills into that child session, and accepts only a prepared submission from that same session.
 
-The UI user can give a short goal, such as “Investigate qmq kernel performance within the configured budget.” The existing `meteor-kernel-test` skill contains chief's initialization, device preparation, startup, waiting and continuation duties. Chief calls `meteor_init` for a missing project, then `meteor_hardware_probe` with an optional `profile_ref`, reads the report and resolves setup failures before research. A successful probe records actual device/toolchain identity and capability; it does not replace the child's tests of its own kernels. The native `meteor-skills` integration uses a global provider for bundled defaults and a provider registered in chief's scope when that Agent is created, so current-project skills can take precedence over a parent Git repository's skills. Research children keep their frozen skill layer.
+The UI user can give a short goal. `meteor-kernel-test` handles dispatch and continuation; the Chief-only `meteor-hardware-prepare` skill handles device/model/template preparation. Diagnostic sources and commands are written before dispatch, use the same FIFO and retain original request IDs for poll/collect/cancel. Setup diagnostics never become an author's kernel full receipt. The skill provider exposes all three skills to Chief; research children retain their two frozen research skills.
 
 ### Starting A Research Task
 
@@ -98,6 +139,8 @@ Chief may inspect a small set of relevant internal files and library evidence, a
 
 For an authorized sustained goal, chief first completes one research to check reliable calls, tool execution, reporting and automatic integration. After that succeeds, it chooses concurrency within the overall budget, each research's budget, and device capacity. It collects the research and integration receipts, evaluates progress toward the overall goal, and starts another distinct research when work and budget remain. Native jobs and available durable goal facilities track this work. Completing one research does not complete the overall goal, and starting another research does not reset its budget. Unknown remote requests must be queried or collected before retrying their work.
 
+Chief can use `meteor_control` with `action: "requests"` and `research_id` to list persisted SSH request identities, then `poll_request`, `collect_request`, or `cancel_request` with a returned `request_id` or `remote_request_id`. This remains available after the original child ends or the host restarts. It uses the research's frozen target, runtime and profile; it does not replay experiments, change the research's terminal state/budget, or turn raw remote evidence into an author submission. A changed central profile is rejected. Older research without the request journal remains unconfirmed through this entry; local build/run IDs are not remote request IDs.
+
 Chief decides each start. The plugin creates one child per `meteor_start` and does not recursively create more research Agents. Credentials stay in centralized configuration and are excluded from prompts, task inputs and reports.
 
 While a research job runs, Chief can review completed evidence or prepare the next hypothesis. When progress requires that job, it uses native `job_output` with `wait:true` and a bounded timeout instead of shell sleeps or rapid polling. In alpha.2 an armed goal continues independently of background-job state, so ending repeated empty turns is not a passive wait. The existing skill covers this distinction and completion notifications.
@@ -148,7 +191,7 @@ automatically rerun. See the [queue design and validation](docs/2026-09-24-remot
 
 ### Default Full-Size Suite
 
-New projects use **192 fixed qmq-v1 shapes**, with an envelope of **M=1–8192, N=1–32769, K=1–8192**. The matrix retains the four previous smoke cases and adds alignment and routing boundaries, zero-input cases, and representative large matrices including 4096³. This is a finite selection, not the Cartesian product or a kernel support guarantee. See the [coverage policy](templates/project/asc/full-size-policy.md) and [existing-kernel audit](docs/2026-09-24-full-size-coverage.md).
+New projects use **192 fixed qmq-v1 shapes**, with an envelope of **M=1–8192, N=1–32769, K=1–8192**. The matrix retains the four previous smoke cases and adds alignment and routing boundaries, zero-input cases, and representative large matrices including 4096³. This is a finite selection, not the Cartesian product or a kernel support guarantee. See the [coverage policy](templates/project/cases/qmq-v1/int8/default/full-size-policy.md) and [existing-kernel audit](docs/2026-09-24-full-size-coverage.md).
 
 Preparing inputs and CPU goldens requires about **201.5 MiB** of pinned binary data. Preparation is asynchronous and cancellable. Every delivered revision still needs its author's full single-kernel test, with unsupported cases counted separately from passes. Existing fixed suites and receipts are preserved; extending an old project requires selecting a new suite file before the next research.
 
@@ -163,11 +206,19 @@ Each research task uses:
 
 The research Agent tests chief's supplied hypothesis, or proposes a falsifiable hypothesis when none was supplied. Kernel performance, hypothesis verdict, and integration routing are recorded separately. Mock evidence can exercise protocol paths, but it cannot prove a real hardware hypothesis.
 
+### Kernel Authoring
+
+The same Agent writes expected hardware activities as source comments, implements them, observes test/profile evidence, and compares the evidence with its original expectations. `meteor_design` provides `open`, `check`, `freeze`, and `compare`; it does not launch another Agent. Both the primitive computation graph and execution IR live in one `meteor-ir:v1` source comment. `check` saves an immutable expectation before implementation, and `freeze` binds the exact candidate used for the next build.
+
+The replaceable strategy registry defaults to `layered-ir@1`. The 28 computation-graph primitives describe hardware-independent semantics. Execution activity IDs/resources come exclusively from the frozen hardware model; no activity vocabulary is built into the parser. Shared checks enforce graph types/references, model membership, coverage, expected-before-code order and evidence identity. Model evidence uses documented/measured/hypothesis/unknown distinctions. Models and diagnostic sources bind the exact hardware report hash as well as device/environment identity; re-probing requires renewed preparation even when an unobserved runtime change leaves the stable environment ID unchanged. Existing research keeps its snapshot. Publishing validates provenance and structure, not the scientific interpretation of a source or universal hardware behavior. Read the [authoring guide](templates/project/tools/meteor/design/guide.md).
+
 ## Knowledge And Versioning
 
-The initialized project contains a structured SQLite library under `reports/meteor/<backend>/knowledge/catalog.sqlite`, with normalized tables for research runs, hypotheses, experiments, kernel submissions, measurements, knowledge claims, novelty events, commits, reports, and integration events.
+The initialized project contains `knowledge/catalog.sqlite` plus immutable claim JSON files in the four scope levels shown above. `scope_level` is hardware/op/dtype/shape; shape knowledge supplies `shape_range: {shape_id, dimensions: {axis: {min, max}}}` with inclusive positive bounds. Category is an independent tag. Automatic selection inherits HW → same op → same dtype → matching shape range; pass `initial_context.shape` to match intervals. Without shape context, shape claims are not automatically inherited. Explicit foreign-scope references remain readable as `inspiration_only`. Scope declarations are not proofs that a claim holds throughout a range.
 
-After a valid final submission, meteor automatically consumes the SQLite outbox, selects compatible full-size single-kernel measurements by exact case, and renders a routed version through `asc/version.asc.tmpl`. The integration result is an assembly artifact only:
+SQLite indexes research, evidence, claims, novelty, commits, reports and integration events. Schema 3 maps legacy hardware applicability to hardware scope and other old claims to dtype scope, preserving original submissions/novelty. Historical claim files are not fabricated during migration. New commits write the four-level immutable claim files before the catalog transaction commits; a file conflict/failure rolls back catalog, commit and integration-event publication. Any already-written unindexed immutable files remain reusable on retry. Replaying the same commit does not refresh novelty. Explicit mock artifacts/catalogs stay under `.meteor/mock/`. Research snapshots carry knowledge code, never a live catalog.
+
+After a valid final submission, meteor consumes the target's SQLite outbox. Within exactly the same workspace/op/dtype, it filters compatible full-size author receipts to recommended PASS cases, chooses the smallest measured median for each shape, then renders through the Chief-selected frozen template. Exactly equal medians retain historical priority; no near-tie threshold selects a slower kernel. The old `min_relative_improvement` config field is accepted for compatibility but no longer controls selection. The plugin emits source slots, implementation/bucket macro data and an exact-shape route body; the template defines its outer ABI and launcher call. See [assembly contract](templates/project/tools/meteor/assembly-guide.md). Unmeasured shapes are not inferred from a bucket. The integration result is an assembly artifact only:
 
 - `integration_validation=NOT_RUN`
 - no integrated-version benchmark is claimed
@@ -175,7 +226,7 @@ After a valid final submission, meteor automatically consumes the SQLite outbox,
 
 ## Testing Rule For Live DSH Runs
 
-Chief may use completed reports and reproducible behavior gaps to improve the existing project persona or either skill, then start future research with the updated snapshot. Keep the current research's snapshot and original evidence intact. Do not feed hints to the running Agent, write its final answer for it, or repair its research result manually. The project retains one persona and two skills.
+Chief may use completed reports and reproducible behavior gaps to improve the project persona or relevant skills, then start future research with the updated snapshot. Keep current research snapshots and original evidence intact. Do not feed hints to the running Agent, write its final answer for it, or repair its research result manually. The project has one research persona, two research skills and one Chief hardware-preparation skill.
 
 ## Validation Commands
 

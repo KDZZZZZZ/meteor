@@ -230,6 +230,7 @@ def patch_driver_handlers(driver, root: Path, release: Path | None, active: Path
     driver.action_test = controlled
     driver.action_profile = controlled
     driver.action_hardware = controlled
+    driver.action_hardware_experiment = controlled
 
 
 def driver_worker(args: argparse.Namespace) -> int:
@@ -374,13 +375,17 @@ def scenario_driver_actions_share_one_slot(root: Path, driver_dir: Path) -> None
     remote_root = root / "driver-remote"
     queue_root = root / "driver-queue"
     active = root / "driver-active.txt"
-    releases = {action: root / f"driver-{action}.release" for action in ["build", "test", "profile", "hardware"]}
+    actions = ["build", "test", "profile", "hardware", "hardware_experiment"]
+    releases = {action: root / f"driver-{action}.release" for action in actions}
     runs = []
-    for action in ["build", "test", "profile", "hardware"]:
+    for action in actions:
         run = spawn_driver_worker(root, driver_dir, remote_root, queue_root, action, f"drv-{action}", releases[action], active)
         runs.append((action, run))
-    wait_for(remote_root / "requests" / "drv-build" / "handler-entered", runs[0][1])
-    for action in ["test", "profile", "hardware"]:
+        if action == "build":
+            # Process creation order is not enqueue order. Establish the slot
+            # owner before launching contenders; FIFO governs actual arrivals.
+            wait_for(remote_root / "requests" / "drv-build" / "handler-entered", run)
+    for action in actions[1:]:
         status = wait_status(remote_root / "requests" / f"drv-{action}", "queued")
         queue_info = status.get("queue", {})
         if status.get("state") != "queued" or int(queue_info.get("position", 0)) < 1:
@@ -410,7 +415,7 @@ def scenario_driver_actions_share_one_slot(root: Path, driver_dir: Path) -> None
     if active.exists():
         raise ScenarioError("driver active marker leaked")
     events = [json.loads(line)["action"] for line in (root / "driver-events.jsonl").read_text(encoding="utf-8").splitlines()]
-    if events[0] != "build" or sorted(events) != ["build", "hardware", "profile", "test"]:
+    if events[0] != "build" or sorted(events) != sorted(actions):
         raise ScenarioError(f"driver action coverage/order violated: {events}")
 
 

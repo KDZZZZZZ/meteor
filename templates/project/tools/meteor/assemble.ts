@@ -1,7 +1,14 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Dependency, KernelModule, Project } from './contracts.ts';
 import { assert, inside, sha256 } from './util.ts';
+import { assertTarget, isWorkspace, targetFile } from './workspace.ts';
+
+export const VERSION_TEMPLATE_SLOT_CONTRACT = 'meteor-version-slots-v1' as const;
+export const VERSION_TEMPLATE_REQUIRED_SLOTS = [
+  'ASSEMBLY_KEY', 'DEPENDENCY_PREAMBLE', 'SHARED_CODE', 'HOST_CONTEXT_HELPERS',
+  'KERNEL_DEVICE_CODE', 'KERNEL_HOST_LAUNCHERS', 'IMPLEMENTATION_TABLE', 'BUCKET_TABLE', 'ROUTE_FUNCTION_BODY',
+] as const;
 
 export interface SingleKernelRenderOptions {
   assembly_key?: string;
@@ -28,8 +35,32 @@ export interface VersionSpec {
 }
 
 function readTemplate(project: Project, name: string): string {
-  const templateRoot = (project as Project & { snapshotRoot?: string }).snapshotRoot ?? project.root;
-  return readFileSync(inside(templateRoot, `asc/${name}`), 'utf8');
+  return readFileSync(inside(targetFile(project, 'template_ref'), name), 'utf8');
+}
+
+export function validateAssemblyTemplateText(template: string): void {
+  const known = new Set<string>(VERSION_TEMPLATE_REQUIRED_SLOTS as unknown as string[]);
+  const placeholders = [...template.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map(match => match[1]);
+  for (const slot of placeholders) assert(known.has(slot), `Unknown assembly template slot: ${slot}`);
+  for (const slot of VERSION_TEMPLATE_REQUIRED_SLOTS) {
+    const count = placeholders.filter(item => item === slot).length;
+    assert(count === 1, `Assembly template slot ${slot} must appear exactly once`);
+  }
+}
+
+function readVersionTemplate(project: Project): string {
+  if (isWorkspace(project)) {
+    assert(project.target?.assembly_template_ref, 'Assembly template setup required: Chief must configure assembly_template_ref for this op/dtype before automatic version integration');
+    const path = targetFile(project, 'assembly_template_ref');
+    assert(existsSync(path), `Assembly template missing: ${project.target.assembly_template_ref}`);
+    const text = readFileSync(path, 'utf8');
+    if (project.target.assembly_template?.sha256) assert(sha256(text) === project.target.assembly_template.sha256, 'Assembly template hash mismatch; rerun Chief template configuration for this target');
+    validateAssemblyTemplateText(text);
+    return text;
+  }
+  const text = readTemplate(project, 'version.asc.tmpl');
+  validateAssemblyTemplateText(text);
+  return text;
 }
 
 function readPinnedHostContext(project: Project): string {
@@ -44,7 +75,8 @@ function renderSlots(template: string, slots: Record<string, string>): string {
     assert(count === 1, `Template slot ${name} must appear exactly once`);
     output = output.split(marker).join(value);
   }
-  assert(!output.includes('{{'), 'Unrendered template slot remains');
+  const leftover = output.match(/\{\{([^}]+)\}\}/);
+  assert(!leftover, leftover ? `Unrendered or unknown template slot remains: ${leftover[1]}` : 'Unrendered template slot remains');
   return output;
 }
 
@@ -72,6 +104,7 @@ function validateSuite(project: Project): void {
 }
 
 function validateModule(module: KernelModule, project: Project): void {
+  if (isWorkspace(project)) assertTarget(project, module.target, 'Assembly module');
   assert(module.operator_abi === project.suite.operator_abi, `Module ${module.kernel_id}@${module.revision} ABI does not match suite`);
   validatePrefix(module.symbol_prefix);
   assert(module.launcher === `${module.symbol_prefix}launch`, `Launcher mismatch: symbol_prefix ${JSON.stringify(module.symbol_prefix)} requires launcher ${JSON.stringify(`${module.symbol_prefix}launch`)}, got ${JSON.stringify(module.launcher)}. Concatenate the prefix and "launch" exactly; include any separator in symbol_prefix. Make the manifest and host function agree, then retry.`);
@@ -198,13 +231,16 @@ export function renderVersion(project: Project, spec: VersionSpec): string {
     }
   }
   const deps = emitDependencies(project, modules);
+  const bucketTable = spec.routes.map(rule =>
+    `METEOR_BUCKET(${rule.rule_id}U, ${rule.implementation_id}U, "${rule.case_ids?.join(',') ?? 'shape'}")`
+  ).join('\n    ');
   const routeSelect = spec.routes.map(rule =>
     `if (${conditionFor(rule, project)}) { return {${rule.rule_id}U, ${rule.implementation_id}U}; }`
   ).join('\n    ');
-  const dispatch = spec.implementations.map(item =>
-    `case ${item.implementation_id}U:\n            status = ${item.module.launcher}(call, shape, resources);\n            break;`
-  ).join('\n        ');
-  const template = readTemplate(project, 'version.asc.tmpl');
+  const implementationTable = spec.implementations.map(item =>
+    `METEOR_IMPLEMENTATION(${item.implementation_id}U, ${item.module.launcher}, "${item.module.kernel_id}@${item.module.revision}")`
+  ).join('\n');
+  const template = readVersionTemplate(project);
   return renderSlots(template, {
     ASSEMBLY_KEY: spec.assembly_key,
     DEPENDENCY_PREAMBLE: deps.preamble,
@@ -212,8 +248,9 @@ export function renderVersion(project: Project, spec: VersionSpec): string {
     HOST_CONTEXT_HELPERS: spec.host_context_helpers ?? readPinnedHostContext(project),
     KERNEL_DEVICE_CODE: modules.map(module => moduleDevice(project, module)).join('\n\n'),
     KERNEL_HOST_LAUNCHERS: modules.map(module => moduleHost(project, module)).join('\n\n'),
-    ROUTE_SELECT_BODY: routeSelect,
-    DISPATCH_CASES: dispatch,
+    IMPLEMENTATION_TABLE: implementationTable,
+    BUCKET_TABLE: bucketTable,
+    ROUTE_FUNCTION_BODY: routeSelect,
   });
 }
 

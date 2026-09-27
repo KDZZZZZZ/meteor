@@ -8,7 +8,7 @@ import { initProject } from '../src/init.ts';
 import { loadProject } from '../src/project.ts';
 import type { BuildReceipt, KernelModule, Submission, TestReceipt } from '../templates/project/tools/meteor/contracts.ts';
 import { buildKernel, buildReceiptPath, experimentDir, receiptRef } from '../templates/project/tools/meteor/kernel-build.ts';
-import { testKernel } from '../templates/project/tools/meteor/kernel-test.ts';
+import { testKernel, testReceiptPath } from '../templates/project/tools/meteor/kernel-test.ts';
 import { bindResearchSession, createResearch } from '../templates/project/tools/meteor/research.ts';
 import { commitSubmission, prepareSubmission, SubmissionValidationError } from '../templates/project/tools/meteor/submit.ts';
 import { writeJson } from '../templates/project/tools/meteor/util.ts';
@@ -34,9 +34,9 @@ async function setup(t: TestContext) {
     bindResearchSession(project, id, 'session_' + id);
   }
   async function measure(researchId: string) {
-    const build = await buildKernel(project, { research_id: researchId, experiment_id: 'measured_1', kernel_path: kernelPath });
+    const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: researchId, experiment_id: 'measured_1', kernel_path: kernelPath });
     const receipt = await testKernel(project, { build_ref: receiptRef(project, buildReceiptPath(project, build)), mode: 'full' });
-    const ref = receiptRef(project, join(experimentDir(project, researchId, receipt.experiment_id), 'full-tests', receipt.run_id + '.json'));
+    const ref = receiptRef(project, testReceiptPath(project, receipt));
     return { build, receipt, ref };
   }
   const original = await measure('research_A');
@@ -57,7 +57,7 @@ async function setup(t: TestContext) {
         full_size_test_refs: [ref, original.ref], profile_refs: [], analysis: 'Reference material remains readable', next_experiment: 'Real hardware',
       }],
       submitted_kernels: [{
-        ...receipt.kernel_ref, source_hash: receipt.source_hash, artifact_refs: [kernelPath + '/kernel.json'], supported_domain: 'Measured cases',
+        ...receipt.kernel_ref, source_hash: receipt.source_hash, artifact_refs: [original.build.module_ref], supported_domain: 'Measured cases',
         verified_case_ids: verified, recommended_domain: 'Measured cases', recommended_case_ids: verified, hardware_scope: 'mock',
         resource_constraints: [], unsupported_cases: receipt.rows.filter(row => row.status === 'UNSUPPORTED').map(row => row.case_id),
         case_suite_revision: receipt.case_suite_revision, environment_ref: receipt.environment_ref, measurement_protocol_ref: receipt.measurement_protocol_ref,

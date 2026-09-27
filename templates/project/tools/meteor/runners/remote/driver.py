@@ -12,6 +12,7 @@ import base64
 import csv
 import hashlib
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -30,6 +31,23 @@ TIMING_PREFIX = "QMQ_TIMING_US "
 SUPPORTED_PROFILE_METRICS = ["kernel_time_us", "device_task_time_us"]
 DEVICE_TASK_TYPES = {"AI_CORE", "AICORE", "AI_VECTOR_CORE", "AI_VECTOR", "AIV", "MIX_AIC", "MIX_AICORE", "MIX_AIV"}
 ACTIVE_QUEUE: ExecutionQueue | None = None
+
+
+class RemoteActionFailure(Exception):
+    """A failed action whose queue/result evidence must cross the transport."""
+
+    def __init__(self, result: dict[str, Any]):
+        super().__init__(result["error"])
+        self.result = result
+
+
+class RemoteCommandTimeout(subprocess.TimeoutExpired):
+    """Bounded command diagnostics, independent of case PASS eligibility."""
+
+    def __init__(self, command: list[str], timeout: float, log: dict[str, Any]):
+        super().__init__(command, timeout, output=log["stdout"], stderr=log["stderr"])
+        self.log = log
+        self.failure_context: dict[str, Any] | None = None
 
 
 def canonical(value: Any) -> str:
@@ -257,7 +275,7 @@ def run_command(command: list[str], cwd: Path, timeout: int = 900) -> dict[str, 
                 break
             except subprocess.TimeoutExpired:
                 continue
-    except BaseException:
+    except BaseException as exc:
         if os.name == "posix":
             # Compiler/profiler children belong to this command's process group.
             # Terminate them before relinquishing the queue's execution slot.
@@ -267,7 +285,13 @@ def run_command(command: list[str], cwd: Path, timeout: int = 900) -> dict[str, 
                 pass
         else:
             proc.kill()
-        proc.communicate()
+        stdout, stderr = proc.communicate()
+        if isinstance(exc, subprocess.TimeoutExpired):
+            raise RemoteCommandTimeout(command, timeout, {
+                "command": command, "returncode": proc.returncode,
+                "stdout": stdout[-20000:], "stderr": stderr[-20000:],
+                "duration_seconds": time.time() - started, "timeout_seconds": timeout,
+            }) from exc
         raise
     return {
         "command": command,
@@ -618,37 +642,46 @@ def execute_case(request: dict[str, Any], remote_root: Path, executable: Path, c
         command = [sys.executable, str(executable), str(shape["m"]), str(shape["n"]), str(shape["k"]), str(device_id), str(warmup), str(repetitions)]
     else:
         command = [str(executable), str(shape["m"]), str(shape["n"]), str(shape["k"]), str(device_id), str(warmup), str(repetitions)]
-    run = run_command(command, case_dir, timeout=900)
-    verify = run_command([sys.executable, str(DRIVER_DIR / "verify_case.py"), str(case_dir), "--report", str(case_dir / "verify.json")], case_dir, timeout=300)
-    timings = parse_timings(run["stdout"])
-    passed = verify["returncode"] == 0
-    if run["returncode"] != 0:
-        status = "RUN_FAILED"
-        reason = "binary returned nonzero"
-    elif not passed:
-        status = "INCORRECT"
-        reason = "verify_case failed"
-    elif len(timings) != repetitions:
-        status = "RUN_FAILED"
-        reason = "timing sample count mismatch"
-    else:
-        status = "PASS"
-        reason = None
-    if simulated:
-        device_execution = {
-            "status": "SIMULATED",
-            "tool": "fake-harness",
-            "reason": "METEOR_REMOTE_DRIVER_FAKE_BUILD is enabled; this is not hardware evidence",
-            "allowed_to_pass": True,
-            "matched_tasks": [],
-        }
-    elif status == "PASS":
-        device_execution = msprof_witness(request, executable, case, case_dir, device_id, warmup, repetitions)
-        if device_execution.get("status") != "CONFIRMED":
+    completed_commands: dict[str, Any] = {}
+    stage = "run"
+    try:
+        run = completed_commands["run"] = run_command(command, case_dir, timeout=900)
+        stage = "verify"
+        verify = completed_commands["verify"] = run_command([sys.executable, str(DRIVER_DIR / "verify_case.py"), str(case_dir), "--report", str(case_dir / "verify.json")], case_dir, timeout=300)
+        timings = parse_timings(run["stdout"])
+        passed = verify["returncode"] == 0
+        if run["returncode"] != 0:
             status = "RUN_FAILED"
-            reason = "device execution witness missing"
-    else:
-        device_execution = {"status": "NOT_RUN", "tool": "msprof", "reason": "not collected because case did not pass functional execution", "allowed_to_pass": False}
+            reason = "binary returned nonzero"
+        elif not passed:
+            status = "INCORRECT"
+            reason = "verify_case failed"
+        elif len(timings) != repetitions:
+            status = "RUN_FAILED"
+            reason = "timing sample count mismatch"
+        else:
+            status = "PASS"
+            reason = None
+        if simulated:
+            device_execution = {
+                "status": "SIMULATED",
+                "tool": "fake-harness",
+                "reason": "METEOR_REMOTE_DRIVER_FAKE_BUILD is enabled; this is not hardware evidence",
+                "allowed_to_pass": True,
+                "matched_tasks": [],
+            }
+        elif status == "PASS":
+            stage = "device_witness"
+            device_execution = msprof_witness(request, executable, case, case_dir, device_id, warmup, repetitions)
+            if device_execution.get("status") != "CONFIRMED":
+                status = "RUN_FAILED"
+                reason = "device execution witness missing"
+        else:
+            device_execution = {"status": "NOT_RUN", "tool": "msprof", "reason": "not collected because case did not pass functional execution", "allowed_to_pass": False}
+    except RemoteCommandTimeout as exc:
+        exc.failure_context = {"case_id": case_id, "stage": stage, "input_hash": input_hash,
+                               "oracle_hash": oracle_hash, "completed_commands": completed_commands}
+        raise
     return {
         "case_id": case_id,
         "status": status,
@@ -1059,11 +1092,54 @@ def action_cancel(request: dict[str, Any], remote_root: Path) -> dict[str, Any]:
     return {"status": "CANCEL_REQUESTED", "state": status, "remote_released": False}
 
 
+def action_hardware_experiment(request: dict[str, Any], remote_root: Path, request_dir: Path) -> dict[str, Any]:
+    """Chief-authored setup diagnostic; no built-in activity vocabulary or kernel receipt."""
+    files, commands = request.get("files"), request.get("commands")
+    if not isinstance(files, list) or not 1 <= len(files) <= 32 or len(json.dumps(files).encode()) > 1000000:
+        raise ValueError("hardware experiment needs 1-32 source files, at most 1 MB")
+    if not isinstance(commands, list) or not 1 <= len(commands) <= 8:
+        raise ValueError("hardware experiment needs 1-8 commands")
+    total = 0
+    for command in commands:
+        argv, timeout = command.get("argv"), command.get("timeout_seconds")
+        if not isinstance(argv, list) or not argv or not all(isinstance(x, str) and x for x in argv):
+            raise ValueError("diagnostic argv must be a nonempty string array")
+        if type(timeout) is not int or not 1 <= timeout <= 900:
+            raise ValueError("diagnostic timeout must be 1-900 seconds")
+        total += timeout
+    if total > 1800:
+        raise ValueError("diagnostic commands exceed 1800 seconds total budget")
+    work = request_dir / "diagnostic"
+    work.mkdir(exist_ok=True)
+    seen = set()
+    for file in files:
+        name, content = file.get("path"), file.get("content")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_./-]+", name) or any(x in {"", ".", ".."} for x in name.split("/")) or name in seen or not isinstance(content, str):
+            raise ValueError("diagnostic files need unique safe relative paths and text content")
+        seen.add(name)
+        path = inside(work, name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    logs = []
+    for index, command in enumerate(commands):
+        try:
+            log = run_command(command["argv"], work, command["timeout_seconds"])
+        except RemoteCommandTimeout as exc:
+            exc.failure_context = {"stage": "hardware_experiment", "command_index": index, "completed_commands": logs}
+            raise
+        logs.append(log)
+        if log["returncode"] != 0:
+            return {"status": "FAILED", "backend": "ssh", "simulated": fake_enabled(), "commands": logs,
+                    "question": request.get("question"), "reason": "Diagnostic command failed; no capability inferred"}
+    return {"status": "COMPLETED", "backend": "ssh", "simulated": fake_enabled(), "commands": logs,
+            "question": request.get("question"), "interpretation": "Command evidence only; Chief must justify hardware claims and observation limits"}
+
+
 def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     global ACTIVE_QUEUE
     action = request.get("action")
-    if action not in {"build", "test", "profile", "hardware", "poll", "collect", "cancel"}:
-        raise ValueError("action must be build, test, profile, hardware, poll, collect, or cancel")
+    if action not in {"build", "test", "profile", "hardware", "hardware_experiment", "poll", "collect", "cancel"}:
+        raise ValueError("action must be build, test, profile, hardware, hardware_experiment, poll, collect, or cancel")
     remote_root = require_remote_root(request.get("remote_root"))
     if action in {"poll", "collect", "cancel"}:
         if action == "poll":
@@ -1096,7 +1172,8 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         try:
             with queue:
                 ACTIVE_QUEUE = queue
-                handler = {"build": action_build, "test": action_test, "profile": action_profile, "hardware": action_hardware}[action]
+                handler = {"build": action_build, "test": action_test, "profile": action_profile, "hardware": action_hardware,
+                           "hardware_experiment": action_hardware_experiment}[action]
                 stored = read_json(request_dir / "payload.json")
                 if sha256_text(canonical(stored)) != payload_hash:
                     raise ValueError("Durable request payload changed while queued")
@@ -1104,10 +1181,19 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         except QueueCancelled as exc:
             result = {"status": "CANCELLED", "backend": "ssh", "simulated": fake_enabled(), "reason": str(exc)}
         except Exception as exc:
-            if queue.released():
-                finish(request_dir, {"status": "FAILED", "backend": "ssh", "simulated": fake_enabled(),
-                                     "error": str(exc), "queue": queue.queue, "remote_release_confirmed": True})
-            raise
+            released = queue.released()
+            result = {"status": "FAILED" if released else "UNKNOWN_REMOTE", "backend": "ssh", "simulated": fake_enabled(),
+                      "error": str(exc), "error_type": type(exc).__name__, "queue": queue.queue,
+                      "remote_release_confirmed": released}
+            if isinstance(exc, RemoteCommandTimeout):
+                result["failed_command"] = exc.log
+                if exc.failure_context is not None:
+                    result["failure_context"] = exc.failure_context
+            if released:
+                result = finish(request_dir, result)
+            else:
+                result["reason"] = "Execution ticket release is unconfirmed; poll the original request"
+            raise RemoteActionFailure(result) from exc
         finally:
             ACTIVE_QUEUE = None
         released = queue.released()
@@ -1126,6 +1212,8 @@ def main() -> int:
         return 0
     except Exception as exc:
         response = {"ok": False, "error": str(exc)}
+        if isinstance(exc, RemoteActionFailure):
+            response.update({"action": request.get("action"), "request_id": request.get("request_id"), "result": exc.result})
         print(json.dumps(response, sort_keys=True, ensure_ascii=True))
         return 1
 

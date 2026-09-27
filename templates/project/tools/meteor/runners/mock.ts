@@ -2,6 +2,8 @@ import type { BuildReceipt, Measurement, ProfileReceipt, Project, TestReceipt } 
 import { hashObject, sha256 } from '../util.ts';
 import type { BuildRequest, ProfileRequest, Runner, TestRequest } from './contract.ts';
 import { normalizeFixture, selectCases, summarizeRows } from './contract.ts';
+import { buildReceiptPath, receiptRef } from '../kernel-build.ts';
+import { assertTarget, targetRef } from '../workspace.ts';
 
 function deterministicMicros(seed: unknown): number {
   const hex = hashObject(seed).slice(0, 8);
@@ -21,6 +23,7 @@ function median(values: number[]): number | undefined {
 
 function fixtureSeed(project: Project, fixture: unknown) {
   return {
+    ...(targetRef(project) ? { target: targetRef(project) } : {}),
     fixture,
     case_suite_revision: project.suite.revision,
     cases: project.suite.cases.map(item => ({
@@ -61,6 +64,7 @@ export class MockRunner implements Runner {
     const seed = fixtureSeed(request.project, fixture);
     const status = fixture.build_status ?? 'COMPLETED';
     return {
+      ...(targetRef(request.project) ? { target: targetRef(request.project) } : {}),
       build_id: sha256(hashObject({
         kind: 'mock-build',
         research_id: request.research_id,
@@ -91,6 +95,7 @@ export class MockRunner implements Runner {
   }
 
   async test(request: TestRequest): Promise<TestReceipt> {
+    assertTarget(request.project, request.build.target, 'Mock build');
     request.signal?.throwIfAborted();
     const fixture = normalizeFixture(request.fixture);
     const seed = fixtureSeed(request.project, fixture);
@@ -142,7 +147,8 @@ export class MockRunner implements Runner {
       research_id: request.build.research_id,
       experiment_id: request.build.experiment_id,
       kernel_ref: request.build.kernel_ref,
-      build_ref: `reports/meteor/mock/research/${request.build.research_id}/experiments/${request.build.experiment_id}/builds/${request.build.build_id}.json`,
+      build_ref: receiptRef(request.project, buildReceiptPath(request.project, request.build)),
+      ...(targetRef(request.project) ? { target: targetRef(request.project) } : {}),
       source_hash: request.build.source_hash,
       artifact_hash: request.build.artifact_hash,
       execution_backend: 'mock',
@@ -160,6 +166,7 @@ export class MockRunner implements Runner {
   }
 
   async profile(request: ProfileRequest): Promise<ProfileReceipt> {
+    assertTarget(request.project, request.build.target, 'Mock build');
     request.signal?.throwIfAborted();
     if (request.build.status !== 'COMPLETED') throw new Error(`Cannot profile failed build ${request.build.build_id}`);
     if (request.build.execution_backend !== 'mock') throw new Error('Mock profile requires a mock build receipt');
@@ -193,6 +200,8 @@ export class MockRunner implements Runner {
         metrics: request.metrics,
         seed,
       })).slice(0, 24),
+      ...(targetRef(request.project) ? { target: targetRef(request.project) } : {}),
+      build_ref: receiptRef(request.project, buildReceiptPath(request.project, request.build)),
       research_id: request.build.research_id,
       experiment_id: request.build.experiment_id,
       kernel_ref: request.build.kernel_ref,

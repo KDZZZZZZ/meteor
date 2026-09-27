@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Agent, DshContext } from './host.ts';
 
-const NAMES = ['meteor-kernel-test', 'meteor-performance-analysis'];
+const NAMES = ['meteor-hardware-prepare', 'meteor-kernel-test', 'meteor-performance-analysis'];
 const PROVIDER = 'meteor-skills';
 const bundledRoot = fileURLToPath(new URL('../templates/project/.dsh/skills/', import.meta.url));
 type Lookup = { cwd?: string; signal?: AbortSignal };
@@ -66,7 +66,7 @@ export function registerChiefSkills(ctx: DshContext) {
   const invalidate = () => { for (const refresh of invalidators) refresh(); };
   const disposeObserver = ctx.on('fs/observed', (target: { displayPath?: string }, _observation: unknown, actor?: { name?: string }) => {
     if (actor?.name !== 'edit' && actor?.name !== 'write') return;
-    if (target.displayPath && /[/\\]\.dsh[/\\]skills[/\\]meteor-(kernel-test|performance-analysis)[/\\]SKILL\.md$/.test(target.displayPath)) invalidate();
+    if (target.displayPath && /[/\\]\.dsh[/\\]skills[/\\]meteor-(hardware-prepare|kernel-test|performance-analysis)[/\\]SKILL\.md$/.test(target.displayPath)) invalidate();
   });
   return { invalidate, dispose: () => {
     disposeObserver(); disposeCreated(); disposeRemoved();

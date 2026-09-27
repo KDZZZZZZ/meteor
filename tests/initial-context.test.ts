@@ -8,11 +8,12 @@ import { initProject } from '../src/init.ts';
 import { loadProject } from '../src/project.ts';
 import type { InitialContext, KernelModule, Submission } from '../templates/project/tools/meteor/contracts.ts';
 import { buildKernel, buildReceiptPath, experimentDir, receiptRef } from '../templates/project/tools/meteor/kernel-build.ts';
-import { testKernel } from '../templates/project/tools/meteor/kernel-test.ts';
-import { bindResearchSession, createResearch } from '../templates/project/tools/meteor/research.ts';
+import { testKernel, testReceiptPath } from '../templates/project/tools/meteor/kernel-test.ts';
+import { bindResearchSession, createResearch, researchPath } from '../templates/project/tools/meteor/research.ts';
 import { normalizeInitialContext, sampleMaterials, selectInitialMaterials } from '../templates/project/tools/meteor/sampling.ts';
 import { listJsonFiles, storePaths } from '../templates/project/tools/meteor/store.ts';
 import { commitSubmission, prepareSubmission } from '../templates/project/tools/meteor/submit.ts';
+import { statePath } from '../templates/project/tools/meteor/workspace.ts';
 import { readJson, sha256, writeJson } from '../templates/project/tools/meteor/util.ts';
 
 function tempRoot(t: TestContext) {
@@ -39,9 +40,9 @@ async function setup(t: TestContext) {
   const researchId = 'seed_research';
   createResearch(project, { research_id: researchId, agent_session_id: 'pending', chief_id: 'chief', goal: 'Populate reusable material fixtures' });
   bindResearchSession(project, researchId, 'seed_session');
-  const build = await buildKernel(project, { research_id: researchId, experiment_id: 'experiment_1', kernel_path: kernelPath });
+  const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: researchId, experiment_id: 'experiment_1', kernel_path: kernelPath });
   const receipt = await testKernel(project, { build_ref: receiptRef(project, buildReceiptPath(project, build)), mode: 'full' });
-  const testRef = receiptRef(project, join(experimentDir(project, researchId, receipt.experiment_id), 'full-tests', receipt.run_id + '.json'));
+  const testRef = receiptRef(project, testReceiptPath(project, receipt));
   const verified = receipt.rows.filter(row => row.status === 'PASS').map(row => row.case_id);
   const submission: Submission = {
     research_id: researchId, agent_session_id: 'seed_session', execution_backend: 'mock', termination_reason: 'Fixture complete',
@@ -58,7 +59,7 @@ async function setup(t: TestContext) {
       full_size_test_refs: [testRef], profile_refs: [], analysis: 'Simulated records are reusable only as inspiration', next_experiment: 'Real hardware',
     }],
     submitted_kernels: [{
-      ...receipt.kernel_ref, source_hash: receipt.source_hash, artifact_refs: [kernelPath + '/kernel.json'], supported_domain: 'Fixture cases',
+      ...receipt.kernel_ref, source_hash: receipt.source_hash, artifact_refs: [build.module_ref], supported_domain: 'Fixture cases',
       verified_case_ids: verified, recommended_domain: 'Fixture cases', recommended_case_ids: verified, hardware_scope: 'mock',
       resource_constraints: [], unsupported_cases: [], case_suite_revision: receipt.case_suite_revision, environment_ref: receipt.environment_ref,
       measurement_protocol_ref: receipt.measurement_protocol_ref, full_size_test_ref: testRef, test_status: 'COMPLETED',
@@ -72,7 +73,7 @@ async function setup(t: TestContext) {
   };
   const prepared = prepareSubmission(project, submission);
   const committed = commitSubmission(project, prepared.prepared_submission_id, submission.agent_session_id);
-  return { root, project, kernelPath, module, knowledgePath, testRef, committed };
+  return { root, project, kernelPath: build.source_ref, module: readJson<KernelModule>(join(root, build.module_ref)), knowledgePath, testRef, committed };
 }
 
 test('initial context defaults to random and normalizes a detached specified selection', () => {
@@ -119,7 +120,7 @@ test('specified mode ignores valid sampling without replacing refs, drawing mate
   assert.equal(selection.mode, 'specified');
   assert.deepEqual(selection.initial_context, normalized);
   assert.deepEqual(selection.selected.map(item => item.material_id), ['seed_kernel@r1', 'claim_primary']);
-  assert.equal(listJsonFiles(join(storePaths(env.project).knowledgeRoot, 'sampling-draws')).length, 0);
+  assert.equal(listJsonFiles(statePath(env.project, 'sampling-draws')).length, 0);
   assert.deepEqual(env.project.config.sampling, originalSampling);
   assert.equal(readFileSync(join(env.root, 'meteor.config.json'), 'utf8'), originalConfig);
   assert.deepEqual(context, original);
@@ -128,7 +129,7 @@ test('specified mode ignores valid sampling without replacing refs, drawing mate
     goal: 'Use only the specified inspirations', initial_context: context,
   });
   assert.deepEqual(record.initial_context, normalized);
-  assert.deepEqual(readJson(join(env.project.dataRoot, 'research', record.research_id, 'manifest.json')).initial_context, normalized);
+  assert.deepEqual(readJson(join(researchPath(env.project, record.research_id), 'manifest.json')).initial_context, normalized);
 });
 
 test('random selections replay from the same library and history without changing project sampling', async t => {
@@ -152,7 +153,7 @@ test('random selections replay from the same library and history without changin
   assert.deepEqual(env.project.config.sampling, originalSampling);
   assert.equal(readFileSync(join(env.root, 'meteor.config.json'), 'utf8'), originalConfig);
   assert.deepEqual(context.sampling, { count: 3, seed: 197, epsilon: 0.2, lambda: 7, tau_hours: 6 });
-  const stored = listJsonFiles(join(storePaths(env.project).knowledgeRoot, 'sampling-draws')).map(path => readJson(path));
+  const stored = listJsonFiles(statePath(env.project, 'sampling-draws')).map(path => readJson(path));
   assert.equal(stored.length, 1);
   assert.deepEqual(stored[0].selected, first.selected);
   assert.deepEqual(stored[0].sampling, first.sampling);
@@ -170,7 +171,7 @@ test('specified database IDs and sqlite refs select exactly those readable commi
   });
   assert.equal(selected.mode, 'specified');
   assert.deepEqual(selected.selected.map(item => item.material_id), ['seed_kernel@r1', 'claim_primary']);
-  assert.equal(listJsonFiles(join(storePaths(env.project).knowledgeRoot, 'sampling-draws')).length, 0);
+  assert.equal(listJsonFiles(statePath(env.project, 'sampling-draws')).length, 0);
   const [kernel, knowledge] = selected.selected;
   assert.equal(kernel.ref, 'sqlite://kernel/seed_kernel@r1');
   assert.equal(kernel.revision, 'r1');
@@ -200,7 +201,7 @@ test('specified kernel directories and knowledge files preserve readable sources
   assert.deepEqual(knowledge.source_refs, [knowledge.ref]);
   assert.match(kernel.content_hash, /^[a-f0-9]{64}$/);
   assert.match(knowledge.content_hash, /^[a-f0-9]{64}$/);
-  assert.equal(listJsonFiles(join(storePaths(env.project).knowledgeRoot, 'sampling-draws')).length, 0);
+  assert.equal(listJsonFiles(statePath(env.project, 'sampling-draws')).length, 0);
   for (const material of selection.selected) for (const ref of material.source_refs) assert.ok(readFileSync(ref).length > 0);
 });
 

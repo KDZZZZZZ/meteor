@@ -18,9 +18,9 @@
 
 **2026-09-24 需求修订：** 早期“先 mock、默认 mock、无 SSH 也 ready_mock”的准备方案已被用户的新要求覆盖。mock 保留为显式协议测试能力；初始化不再填入占位设备事实，也不回退到 mock。旧实验、报告和版本记录保留原样，不追认其中缺失的目标设备执行证明。
 
-**2026-09-25 workspace 设计修订（待实现）：** [单 HW workspace 仓库级改造](2026-09-25-single-hardware-workspace-restructure.md)是根配置、路径、公共身份、算子加载、知识库及版本发布的整体迁移；它与局部策略替换分别实现和验收。shape 仍由逐 case 全尺寸实测自动寻找优势区间并形成 version 路由。本轮按人类要求先完成设计，尚未实施迁移。
+**2026-09-25 workspace 设计修订：** [单 HW workspace 仓库级改造](2026-09-25-single-hardware-workspace-restructure.md)是根配置、路径、公共身份、算子加载、知识库及版本发布的整体迁移；它与局部策略替换分别实现和验收。shape 仍由逐 case 全尺寸实测自动寻找优势区间并形成 version 路由。2026-09-26 按后续要求实施 schema 2 初始化与公共 runtime 改造；真实旧实例按迁移检查结果另行记录，见[实施记录](2026-09-26-workspace-implementation.md)。
 
-**当前交付范围：** 本文记录已实现的研究协议、目标完成条件、skill、文件架构和提示词大纲；[version 模板](../../templates/project/asc/version.asc.tmpl)用于研究结束后的集成，[single-kernel 模板](../../templates/project/asc/kernel_test.asc.tmpl)用于实验包装。mock backend、结构化 SQLite 经验库、提交校验、自动 version 装配和 DSH `0.1.7-alpha.2` 宿主接入已落到模板代码；SSH backend 通过集中 profile 启用，真实硬件验证结果另行记录。按用户选择使用 alpha.2，DSH 接口依据安装包和已核实的官方 commit `00102833dfaee1da9f48a3a8eae9d34005a75218`。
+**当前交付范围：** 本文记录已实现的研究协议、目标完成条件、skill、文件架构和提示词大纲；[version 模板](../../templates/project/templates/qmq-v1/int8/version.asc.tmpl)用于研究结束后的集成，[single-kernel 模板](../../templates/project/templates/qmq-v1/int8/kernel_test.asc.tmpl)用于实验包装。mock backend、结构化 SQLite 经验库、提交校验、自动 version 装配和 DSH `0.1.7-alpha.2` 宿主接入已落到模板代码；SSH backend 通过集中 profile 启用，真实硬件验证结果另行记录。按用户选择使用 alpha.2，DSH 接口依据安装包和已核实的官方 commit `00102833dfaee1da9f48a3a8eae9d34005a75218`。
 
 ## 1. 职责与架构
 
@@ -143,9 +143,9 @@ kernel 全尺寸排名、是否击败当前最佳实现、是否产生可集成�
 
 步骤 7 的研究报告不等待集成结果。步骤 8 自动启动并返回独立集成回执，chief 可向用户汇总结果，无需调用集成工具；分桶结果和集成产物不倒填为研究 Agent 的假设证据。
 
-**2026-09-25 设计增补（待实现，按人类最新修订）：** 第 3 步拟抽成可替换的设计策略，统一交回实验计划、现有单 kernel 模块和内部产物引用。实现路径为“公式定义 → 计算图 IR → 硬件原生代码（如 Ascend C）”。按 HW 共享规则从源码生成预测执行 IR，编译运行 case 后转述实测执行 IR；两者对照用于改进生成规则，其中包含对硬件执行能力及原语使用方式的认识。不同 case/运行条件分别转述并绑定对应构建和测量。各阶段由同一 Agent 编写与分析，程序执行约束并反馈；构建、测试与分析仍由原 Agent 调用。旧稿的 IR 格式、字段和证据 schema 继续撤回；计算原语、层级与公共接口见[可替换的 kernel 实验设计步骤](2026-09-25-pluggable-kernel-design-step.md)。
+**2026-09-25 设计增补（2026-09-26 已实施 MVP）：** 第 3 步抽成可替换的设计策略，统一交回实验计划、现有单 kernel 模块和内部产物引用。计算图 IR 与执行 IR 都写在 kernel 源码的结构化注释中：计算图符合公式，执行 IR 的计算语义符合计算图，主体描述预期硬件活动。主流程是“先写预期活动注释 → 写实现代码 → 看实际活动 → 对照注释找偏差”；理想活动是目的，Ascend C 等代码是实现手段。HW 共享规则辅助活动设计，并依据对照改进。不同 case/运行条件的观测绑定对应构建和测量。各阶段由同一 Agent 完成，程序执行约束并反馈；构建、测试与分析仍由原 Agent 调用。旧稿的 IR 格式、字段和证据 schema 继续撤回；原语、层级与公共接口见[可替换的 kernel 实验设计步骤](2026-09-25-pluggable-kernel-design-step.md)。
 
-**计算图原语设计：** 上述设计的第 4.1 节给出 v1 的 28 个计算原语及类型、舍入、溢出等规则；第 4.2 节用其中 9 个完整展开当前量化算子，明确归约树与中间结果复用。图沿用用户提供的 DAG 组织形式，再由 Agent 直接编写硬件原生代码。此为文档设计，原语求值与校验工具尚未实现。
+**IR 原语设计：** 上述设计的第 4.1 节给出 v1 的 28 个计算原语及类型、舍入、溢出等规则；第 4.2 节用其中 9 个完整展开当前量化算子，明确归约树与中间结果复用。图沿用用户提供的 DAG 组织形式，再用第 4.3 节的执行 IR 原语描述预期活动，最后编写原生实现。第 4.4 节定义源码注释和实测对照要求。当前 MVP 实现原语名称、基本类型、引用顺序和活动覆盖检查；独立图求值、索引域与全域数值证明尚未实现。具体格式和范围见[编写指南](../../templates/project/tools/meteor/design/guide.md)。
 
 ## 4. 测试与性能分析 skill
 
@@ -216,8 +216,8 @@ kernel 全尺寸排名、是否击败当前最佳实现、是否产生可集成�
 
 | 模板 | 使用时机与契约 |
 | --- | --- |
-| `asc/kernel_test.asc.tmpl` | 研究实验；固定算子 ABI/输入处理，插入单个模块及 launcher，直接调用一个实现，返回真实执行或 unsupported 状态；没有跨 kernel 的路由表 |
-| `asc/version.asc.tmpl` | 研究结束后的集成；插入多个模块，根据有序路由 AST 生成选择与分派代码 |
+| `templates/qmq-v1/int8/kernel_test.asc.tmpl` | 研究实验；固定算子 ABI/输入处理，插入单个模块及 launcher，直接调用一个实现，返回真实执行或 unsupported 状态；没有跨 kernel 的路由表 |
+| `templates/qmq-v1/int8/version.asc.tmpl` | 研究结束后的集成；插入多个模块，根据有序路由 AST 生成选择与分派代码 |
 
 模块 manifest 至少包含 `kernel_id/revision`、`operator_abi`、预分配符号前缀、device/host 源码和依赖哈希、设备入口、launcher、硬件/工具链及合法输入/资源条件。Host launcher 契约为：
 
@@ -287,7 +287,7 @@ subagent 结束并完成有效提交后，宿主的提交事件处理器自动�
 
 1. 读取 Agent 明确提交的 kernel 与适用范围，核对各自完整、正确、可比的单 kernel 全尺寸矩阵；假设 supported/refuted 不作为 kernel 入选条件。
 2. 在共同硬件/工具链/测试协议下按 case 表现选择实现，处理噪声和近似持平。候选池按环境和 case suite 分组；发现损坏或不匹配的输入时明确报集成输入错误，不补跑测试，不拿别的 kernel 或 version 的数据填空。
-3. 把有证据支持的选择归并为 shape 分桶，限制在 kernel 支持域内；不能无依据扩展到未测 shape。已有合法实现可覆盖其余域，表外行为按[既有桶契约](2026-09-21-shape-bucket-coverage-expansion-plan.md)明确表达。
+3. 把有证据支持的选择归并为 shape 分桶，限制在 kernel 支持域内；不能无依据扩展到未测 shape。有完整证据的其他候选可覆盖剩余已测 case；没有合法匹配时，由[version 模板](../../templates/project/templates/qmq-v1/int8/version.asc.tmpl)返回 Unsupported，不外推未测 shape。
 4. 生成 `version.spec.json` 和 `.asc`，静态校验实现引用、依赖、规则重叠/优先级和覆盖关系。每个执行规则都只能引用同一 version 中的 kernel。
 5. 保存集成输入、每个 case 的选择依据、源码哈希和集成回执，状态为 `ASSEMBLED`。无提交或无可采用变更则 `SKIPPED/NO_CHANGE`。
 
@@ -340,7 +340,7 @@ P(x) = epsilon / |E| + (1 - epsilon) * weight(x) / sum(weight(y), y in E)
 
 插件提供宿主接入和项目模板。初始化后的代码、基础提示词、skill、实验契约及模板由 chief 维护。
 
-下面给出 2026-09-25 修订后的整体目标布局。它覆盖初始化及公共 runtime 的产物组织；当前代码尚需迁移。现有旧路径的兼容、数据库版本和运行中快照处理见[仓库级改造方案](2026-09-25-single-hardware-workspace-restructure.md)。
+下面给出 2026-09-25 修订后的整体目标布局。它覆盖初始化及公共 runtime 的产物组织；schema 2 代码已按该组织实施，详细文件名以初始化模板为准。现有旧路径的兼容、数据库版本和运行中快照处理见[仓库级改造方案](2026-09-25-single-hardware-workspace-restructure.md)。
 
 ```text
 meteor/                                  # 插件源代码与项目模板
@@ -353,9 +353,9 @@ meteor/                                  # 插件源代码与项目模板
     research-tools.ts                    # 开放读取、研究写入、实验工具
     project.ts                           # 加载项目实现并固定运行快照
   templates/project/
-    asc/version.asc.tmpl                 # 已有：仅用于研究交付后的集成
-    asc/kernel_test.asc.tmpl              # 只绑定一个 kernel 的实验入口
-    ...                                  # 当前包内模板，需迁移为下面的目标布局
+    templates/qmq-v1/int8/version.asc.tmpl                 # 已有：仅用于研究交付后的集成
+    templates/qmq-v1/int8/kernel_test.asc.tmpl              # 只绑定一个 kernel 的实验入口
+    ...                                  # 包内初始化模板，与下面的分类布局一致
 ```
 
 ```text
@@ -387,8 +387,8 @@ meteor/                                  # 插件源代码与项目模板
   contracts/<op>/<dtype>/                # 每组算子契约、oracle、适配/模板引用
   cases/<op>/<dtype>/<suite_revision>/   # shape 在 case 中，不作为目录层
   kernels/<op>/<dtype>/<kernel_id>/<revision>/
-    kernel.json / device.asc / host.asc
-  ir/<op>/<dtype>/<design_id>/<revision>/ # 产物分类位置，内部格式另行定义
+    kernel.json / device.asc / host.asc  # 源码含计算图与执行 IR 结构化注释
+  ir/<op>/<dtype>/<design_id>/<revision>/ # 从源码注释提取的索引、展开图和检查视图
   experiments/<op>/<dtype>/<research_id>/<experiment_id>/
     plan.json / analysis.json / artifact-refs.json
   builds/<op>/<dtype>/<build_id>/        # 单 kernel 构建、源码与回执

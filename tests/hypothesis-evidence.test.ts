@@ -8,6 +8,9 @@ import { initProject } from '../src/init.ts';
 import { loadProject } from '../src/project.ts';
 import type { BuildReceipt, KernelModule, ProfileReceipt, Submission, TestReceipt, Verdict } from '../templates/project/tools/meteor/contracts.ts';
 import { buildReceiptPath, computeSourceHash, experimentDir, receiptRef } from '../templates/project/tools/meteor/kernel-build.ts';
+import { testReceiptPath } from '../templates/project/tools/meteor/kernel-test.ts';
+import { profileReceiptPath } from '../templates/project/tools/meteor/kernel-profile.ts';
+import { targetRef } from '../templates/project/tools/meteor/workspace.ts';
 import { bindResearchSession, createResearch } from '../templates/project/tools/meteor/research.ts';
 import { commitSubmission, prepareSubmission, SubmissionValidationError } from '../templates/project/tools/meteor/submit.ts';
 import { hashObject, writeJson } from '../templates/project/tools/meteor/util.ts';
@@ -35,6 +38,7 @@ function setup(t: TestContext) {
   function measurement(id = researchId, kernelId = 'candidate', times = [100, 120]) {
     const kernelPath = `kernels/${id}/${kernelId}/r1`;
     const module: KernelModule = {
+      target: targetRef(project),
       kernel_id: kernelId, revision: 'r1', operator_abi: project.suite.operator_abi,
       symbol_prefix: kernelId + '_', launcher: kernelId + '_launch',
       device_file: kernelPath + '/device.asc', host_file: kernelPath + '/host.asc',
@@ -46,6 +50,7 @@ function setup(t: TestContext) {
     writeFileSync(join(root, module.host_file), `MeteorStatus ${module.launcher}(const MeteorCall&, const MeteorShape&, const MeteorResources&) { return MeteorStatus::Success; }\n`);
     const sourceHash = computeSourceHash(project, module);
     const build: BuildReceipt = {
+      target: targetRef(project),
       build_id: 'build_' + kernelId, research_id: id, experiment_id: experimentId,
       kernel_ref: { kernel_id: kernelId, revision: 'r1' }, source_hash: sourceHash,
       artifact_hash: hashObject(['artifact', id, kernelId]), environment_ref: project.config.environment.environment_ref,
@@ -60,6 +65,7 @@ function setup(t: TestContext) {
         matched_tasks: [{ case_id: item.case_id, device_id: 0, task_type: 'AI_CORE', op_name: `${kernelId}_device` }] },
     }));
     const receipt: TestReceipt = {
+      target: targetRef(project),
       run_id: 'run_' + kernelId, research_id: id, experiment_id: experimentId, kernel_ref: build.kernel_ref,
       build_ref: buildRef, source_hash: sourceHash, artifact_hash: build.artifact_hash,
       execution_backend: 'ssh', simulated: false, case_suite_revision: project.suite.revision,
@@ -67,13 +73,14 @@ function setup(t: TestContext) {
       mode: 'full', status: 'COMPLETED', rows, accounting_complete: true,
       supported_correct_count: rows.length, timed_case_count: rows.length, data_hash: hashObject(rows),
     };
-    const ref = receiptRef(project, join(experimentDir(project, id, experimentId), 'full-tests', receipt.run_id + '.json'));
+    const ref = receiptRef(project, testReceiptPath(project, receipt));
     writeJson(join(root, ref), receipt);
     return { build, buildRef, receipt, ref };
   }
   const measured = measurement();
   function profile(changes: Partial<ProfileReceipt> = {}) {
     const receipt: ProfileReceipt = {
+      target: targetRef(project), build_ref: measured.buildRef,
       profile_id: 'profile_candidate', research_id: researchId, experiment_id: experimentId,
       kernel_ref: measured.build.kernel_ref, source_hash: measured.build.source_hash,
       environment_ref: measured.build.environment_ref, execution_backend: 'ssh', simulated: false, instrumented: false,
@@ -85,7 +92,7 @@ function setup(t: TestContext) {
       })),
       ...changes,
     };
-    const ref = receiptRef(project, join(experimentDir(project, researchId, experimentId), 'profiles', receipt.profile_id + '.json'));
+    const ref = receiptRef(project, profileReceiptPath(project, receipt));
     writeJson(join(root, ref), receipt);
     return { receipt, ref };
   }
@@ -136,6 +143,30 @@ test('zero-kernel SSH conclusions require traceable measurements instead of pros
     }
   }
 });
+
+for (const verdict of ['SUPPORTED', 'REFUTED'] as const) {
+  test(`${verdict} probe evidence needs exact references, without a new full test or profile`, t => {
+    const env = setup(t);
+    const rows = env.measured.receipt.rows.slice(0, 1);
+    env.saveReceipt({ ...env.measured.receipt, mode: 'probe', rows,
+      accounting_complete: false, supported_correct_count: 1, timed_case_count: 1, data_hash: hashObject(rows) });
+    const submission = env.submission(verdict);
+    const key = verdict === 'SUPPORTED' ? 'supporting_evidence' : 'counterevidence';
+    submission.hypothesis[key] = [`The probe at ${env.measured.ref} measured this prediction.`];
+    assert.throws(() => prepareSubmission(env.project, submission), (error: unknown) =>
+      error instanceof SubmissionValidationError && error.issues.some(item => item.code === 'MISSING_REAL_MEASUREMENT'));
+
+    // Reuse the same immutable partial probe: both reference forms are valid.
+    submission.hypothesis[key] = [env.measured.ref];
+    prepareSubmission(env.project, submission);
+    submission.hypothesis[key] = [env.experimentId];
+    const prepared = prepareSubmission(env.project, submission);
+    const report = commitSubmission(env.project, prepared.prepared_submission_id, submission.agent_session_id);
+    assert.equal(report.verdict, verdict);
+    assert.equal(report.research_goal_met, true);
+    assert.equal(report.submitted_kernel_count, 0);
+  });
+}
 
 test('zero-kernel SSH conclusions reject mock, simulated, and unmarked measurements', t => {
   const env = setup(t);

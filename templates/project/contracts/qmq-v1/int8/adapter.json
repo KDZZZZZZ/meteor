@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "qmq-v1",
+  "operator_abi": "qmq-v1",
+  "input_dtype": "int8",
+  "layout": "qmq-v1",
+  "shape_fields": ["m", "n", "k"],
+  "generator_ref": "tools/meteor/runners/remote/gen_case.py",
+  "verifier_ref": "tools/meteor/runners/remote/verify_case.py",
+  "remote_runtime_ref": "tools/meteor/runners/remote"
+}

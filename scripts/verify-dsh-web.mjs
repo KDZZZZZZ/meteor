@@ -1,9 +1,9 @@
 // Full official Web composition smoke. No credentials or model requests required.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const modules = resolve(process.argv[2] ?? process.env.METEOR_DSH_MODULE_ROOT ?? '');
@@ -36,10 +36,25 @@ const { ctx, shutdown } = await runProfile({
 let handle;
 let releaseStep;
 try {
+  let childResolve;
+  let childStartupPrompt;
+  const childReady = new Promise(resolveChild => { childResolve = resolveChild; });
+  const stepGate = new Promise(resolveGate => { releaseStep = resolveGate; });
+  const chiefMessages = [];
+  // Install the gate before creating either Agent, including any chief wakeup.
+  ctx.on('agent/pre-step', async payload => {
+    if (payload.agent.session.header.origin === 'subagent') {
+      childStartupPrompt ??= (payload.messages ?? []).flatMap(message => message.content ?? [])
+        .find(block => block.type === 'text' && typeof block.text === 'string' && block.text.startsWith('METEOR_RESEARCH '))?.text;
+      childResolve(payload.agent);
+      await stepGate;
+    } else chiefMessages.push(...payload.messages ?? []);
+    return { kind: 'reject' };
+  });
   const presets = ctx.get('agentPresets');
   assert(presets, 'Native preset registry must be mounted');
   const preset = await presets.resolve('standard');
-  console.log('WEB_PRESET', JSON.stringify(preset));
+  console.log('WEB_PRESET', JSON.stringify({ id: preset.id }));
   handle = await ctx.get('agents').create({
     sessionId: 'meteor-contract-chief', meta: { cwd: project, agentPreset: preset.id },
     setup: agentCtx => presets.mount(agentCtx, preset.id).then(() => undefined),
@@ -62,10 +77,17 @@ try {
   writeFileSync(join(parentSkills, 'SKILL.md'), '---\nname: meteor-kernel-test\ndescription: Parent project skill\n---\nPARENT_SKILL_ONLY\n');
   const initialized = await call('meteor_init', {});
   assert.equal(initialized.state, 'setup_required');
+  assert(initialized.workspace_id, 'Initialization must identify the single-hardware workspace');
   assert(tools.schemas(chief).some(tool => tool.name === 'meteor_hardware_probe'));
-  // This native composition check deliberately uses explicit simulated fixtures.
+  // This isolated project is an explicit mock protocol fixture. This smoke
+  // performs no build, measurements, device probe, or hardware hypothesis test.
   const configPath = join(project, 'meteor.config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  assert.equal(config.schema_version, 2);
+  assert(config.targets?.length, 'The workspace must register operator/dtype targets');
+  const target = config.targets[0];
+  const targetSelection = { op_id: target.op_id, dtype_id: target.dtype_id };
+  assert.deepEqual(initialized.targets, config.targets);
   config.execution = { backend: 'mock', profile_ref: 'mock-qmq-v1' };
   config.environment = { environment_ref: 'mock-ascend-qmq-v1', hardware: 'simulated-ascend',
     toolchain: 'mock-no-compiler', measurement_protocol_ref: 'mock-median-5-v1', simulated: true };
@@ -75,26 +97,11 @@ try {
   assert(chiefSkill.content.includes('initial_context'), 'Chief must discover the nested project skill after initialization');
   assert(!chiefSkill.content.includes('PARENT_SKILL_ONLY'), 'The current Meteor project must beat the parent Git root');
   assert(tools.schemas(chief).some(tool => tool.name === 'meteor_start'), 'Chief must receive the native start tool schema');
-  let childResolve;
-  let childStartupPrompt;
-  const childReady = new Promise(resolveChild => { childResolve = resolveChild; });
-  const stepGate = new Promise(resolveGate => { releaseStep = resolveGate; });
-  const chiefMessages = [];
-  ctx.on('agent/pre-step', async payload => {
-    if (payload.agent.session.header.origin === 'subagent') {
-      childStartupPrompt ??= (payload.messages ?? []).flatMap(message => message.content ?? [])
-        .find(block => block.type === 'text' && typeof block.text === 'string' && block.text.startsWith('METEOR_RESEARCH '))?.text;
-      childResolve(payload.agent);
-      await stepGate;
-    } else chiefMessages.push(...payload.messages ?? []);
-    // Reject all steps so this contract test cannot call an LLM, including chief wakeups.
-    return { kind: 'reject' };
-  });
-  const initialContext = { mode: 'specified', knowledge_refs: ['asc/operator.json'] };
+  const initialContext = { mode: 'specified', knowledge_refs: [target.contract_ref] };
   const hypothesis = { statement: 'Chief-assigned context remains available in the original research session' };
   const started = await call('meteor_start', {
     research_id: 'web-contract', goal: 'Check native context and cancellation without a model',
-    initial_context: initialContext, hypothesis,
+    target: targetSelection, initial_context: initialContext, hypothesis,
   });
   const startupWait = new AbortController();
   let child;
@@ -104,20 +111,52 @@ try {
     })]);
   } finally { startupWait.abort(); }
   // start() may publish before its first step; the host must bind the same native child.
-  const status = await call('meteor_status', { research_id: 'web-contract' });
+  const status = await call('meteor_status', { research_id: 'web-contract', target: targetSelection });
   assert.equal(status.agent_session_id, child.id);
+  assert.deepEqual(status.target, { workspace_id: config.workspace.workspace_id, ...targetSelection });
+  assert.deepEqual(started.target, status.target);
   assert.deepEqual(status.initial_context, initialContext);
   assert.deepEqual(status.assigned_hypothesis, hypothesis);
-  const seed = JSON.parse(readFileSync(join(project, 'reports/meteor/mock/research/web-contract/seed.json'), 'utf8'));
-  assert.equal(seed.mode, 'specified');
-  assert.equal(seed.selected.length, 1);
   assert(childStartupPrompt, 'Child startup package must include the METEOR_RESEARCH contract block');
   const startup = JSON.parse(childStartupPrompt.split('\n').slice(1).join('\n'));
-  assert.equal(startup.contracts_ref, join(project, 'reports/meteor/mock/research/web-contract/kernel-contracts.md'));
+  const researchDirectory = join(project, '.meteor/mock/research', target.op_id, target.dtype_id, 'web-contract');
+  assert.equal(startup.research_directory, researchDirectory);
+  assert.deepEqual(startup.target, status.target);
+  const seed = JSON.parse(readFileSync(startup.seed_ref, 'utf8'));
+  assert.equal(seed.mode, 'specified');
+  assert.equal(seed.selected.length, 1);
+  assert.equal(startup.contracts_ref, join(researchDirectory, 'kernel-contracts.md'));
   assert(readFileSync(startup.contracts_ref, 'utf8').includes('KernelModule JSON'), 'Child contracts_ref must point to generated readable KernelModule contract');
   assert(!startup.contracts_ref.includes('snapshot'), 'Child must not depend on optional bundled snapshot contract files');
+  assert.equal(startup.formula_ref, join(researchDirectory, 'snapshot', target.contract_ref));
+  assert.equal(startup.operator_contract_ref, startup.formula_ref);
+  assert.equal(startup.kernel_template_ref, join(researchDirectory, 'snapshot', target.template_ref, 'kernel_test.asc.tmpl'));
+  for (const key of ['formula_ref', 'kernel_template_ref', 'operator_adapter_ref', 'oracle_ref', 'design_guide_ref', 'activity_primitives_ref']) {
+    assert(existsSync(startup[key]), `${key} must resolve inside the pinned research snapshot`);
+    assert(relative(join(researchDirectory, 'snapshot'), startup[key]).split(/[\\/]/)[0] !== '..', `${key} must use the research snapshot`);
+  }
   const material = await call('meteor_read_file', { path: seed.selected[0].source_refs[0] }, child);
-  assert.equal(material.text, readFileSync(join(project, 'asc/operator.json'), 'utf8'));
+  assert.equal(material.text, readFileSync(join(project, target.contract_ref), 'utf8'));
+  const designTool = tools.schemas(child).find(tool => tool.name === 'meteor_design');
+  assert(designTool, 'The same child must receive the design tool');
+  const draft = join(researchDirectory, 'drafts/web-protocol/r1');
+  const sourceRef = path => relative(project, path).replaceAll('\\', '/');
+  await call('meteor_write_file', { path: join(draft, 'kernel.json'), content: JSON.stringify({
+    kernel_id: 'web-protocol', revision: 'r1', target: startup.target, operator_abi: startup.case_suite.operator_abi,
+    symbol_prefix: 'web_protocol_', launcher: 'web_protocol_launch',
+    device_file: sourceRef(join(draft, 'device.asc')), host_file: sourceRef(join(draft, 'host.asc')),
+    supported_case_ids: startup.case_suite.cases.map(item => item.case_id), dependencies: [],
+    hardware_scope: 'Explicit mock protocol fixture only', resource_constraints: ['No kernel implementation or hardware measurement'],
+  }) }, child);
+  for (const file of ['device.asc', 'host.asc']) await call('meteor_write_file', {
+    path: join(draft, file), content: '// Protocol-only design setup; implementation and hardware measurements are absent.\n',
+  }, child);
+  const design = await call('meteor_design', { action: 'open', experiment_id: 'protocol-open', kernel_path: sourceRef(draft) }, child);
+  assert.equal(design.status, 'OPEN');
+  assert.equal(resolve(project, design.formula_ref), startup.formula_ref);
+  assert.equal(resolve(project, design.guide_ref), startup.design_guide_ref);
+  assert(existsSync(resolve(project, design.design_ref)), 'Native design open must produce a target-scoped artifact');
+  assert.equal((await call('meteor_status', { research_id: 'web-contract', target: targetSelection })).agent_session_id, child.id);
   const skill = await child.ctx.get('skills').get('meteor-kernel-test', { scope: child, cwd: project, signal });
   assert(skill?.path?.includes('snapshot'), 'Child must load its frozen runtime skill');
   writeFileSync(chiefSkill.path, readFileSync(chiefSkill.path, 'utf8') + '\nFUTURE_RESEARCH_INSTRUCTION\n');
@@ -141,7 +180,7 @@ try {
   const delivered = result.result ?? JSON.stringify(chiefMessages);
   assert.match(delivered, /hypothesis_verdict/);
   assert(delivered.includes(child.id));
-  console.log(JSON.stringify({ version, verified: ['web-preset', 'chief-skill-discovery', 'init-catalog-refresh', 'nested-project-overrides', 'chief-assigned-context', 'generated-kernel-contracts', 'scoped-skills', 'frozen-prompt-snapshot', 'native-compaction', 'same-session-subagent', 'structured-output', 'job-cancel', 'job-result'], model_requests: 0 }));
+  console.log(JSON.stringify({ version, verified: ['web-preset', 'chief-skill-discovery', 'init-catalog-refresh', 'single-hardware-workspace', 'selected-target', 'nested-project-overrides', 'chief-assigned-context', 'generated-kernel-contracts', 'snapshot-design-references', 'same-session-design-open', 'scoped-skills', 'frozen-prompt-snapshot', 'native-compaction', 'same-session-subagent', 'structured-output', 'job-cancel', 'job-result'], execution_backend: 'mock', model_requests: 0, hardware_measurements: 0 }));
 } finally {
   releaseStep?.();
   await handle?.dispose();

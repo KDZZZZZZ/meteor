@@ -2,8 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Project, Submission } from './contracts.ts';
-import { hashObject, inside, readJson, safeId, writeImmutable, writeJson } from './util.ts';
+import type { Project, Submission, TargetRef } from './contracts.ts';
+import { assert, hashObject, inside, readJson, safeId, writeImmutable, writeJson } from './util.ts';
+import { artifactRoot, assertTarget, isWorkspace, knowledgePath, scopeKey, statePath, targetPath, targetRef } from './workspace.ts';
+import { assertMigrationIdle } from './legacy.ts';
 
 export interface StorePaths {
   backendRoot: string;
@@ -38,7 +40,12 @@ export function nowIso(): string {
 }
 
 export function storePaths(project: Project): StorePaths {
-  const backendRoot = resolve(project.dataRoot);
+  const backendRoot = artifactRoot(project);
+  if (isWorkspace(project)) return {
+    backendRoot, preparedRoot: statePath(project, 'prepared-submissions'), commitRoot: statePath(project, 'research-commits'),
+    reportsRoot: targetPath(project, 'reports'), integrationEventRoot: statePath(project, 'integration-events'),
+    integrationRoot: targetPath(project, 'versions'), knowledgeRoot: knowledgePath(project), artifactRoot: knowledgePath(project, 'artifacts'),
+  };
   return {
     backendRoot,
     preparedRoot: join(backendRoot, 'prepared-submissions'),
@@ -52,6 +59,7 @@ export function storePaths(project: Project): StorePaths {
 }
 
 export function ensureStore(project: Project): StorePaths {
+  assertWritableProject(project);
   const paths = storePaths(project);
   for (const path of Object.values(paths)) mkdirSync(path, { recursive: true });
   initKnowledgeStore(project);
@@ -118,11 +126,12 @@ export function readCommittedSubmissions(project: Project): CommitEnvelope[] {
   return listJsonFiles(storePaths(project).commitRoot)
     .map(path => readJson<CommitEnvelope>(path))
     .filter(envelope => envelope.submission.execution_backend === project.config.execution.backend)
-    .filter(envelope => envelope.submission.hypothesis && envelope.submission.research_id);
+    .filter(envelope => envelope.submission.hypothesis && envelope.submission.research_id)
+    .map(envelope => { assertTarget(project, envelope.submission.target, 'Committed submission'); return envelope; });
 }
 
 export function researchManifestPath(project: Project, researchId: string): string {
-  return join(project.dataRoot, 'research', safeId(researchId), 'manifest.json');
+  return targetPath(project, 'research', safeId(researchId), 'manifest.json');
 }
 
 export function readResearchManifest<T = unknown>(project: Project, researchId: string): T | undefined {
@@ -134,20 +143,28 @@ export function updateResearchManifest(project: Project, researchId: string, pat
   const path = researchManifestPath(project, researchId);
   if (!existsSync(path)) return;
   const current = readJson<Record<string, unknown>>(path);
+  assertTarget(project, current.target as TargetRef | undefined, 'Research manifest');
+  if ('target' in patch) assertTarget(project, patch.target as TargetRef | undefined, 'Research update');
   writeJson(path, { ...current, ...patch });
 }
 
 export function initKnowledgeStore(project: Project): void {
+  assertWritableProject(project);
   const script = knowledgeStoreScript(project);
   if (!existsSync(script)) throw new Error(`knowledge store script not found: ${script}`);
-  const result = spawnSync('python', [script, 'init', storePaths(project).knowledgeRoot], knowledgeProcessOptions());
+  const result = spawnSync('python', [script, 'init', storePaths(project).knowledgeRoot], {
+    ...knowledgeProcessOptions(), input: JSON.stringify({ target: targetRef(project), workspace_root: project.root }),
+  });
   if (result.status !== 0) throw new Error(`knowledge store init failed: ${result.stderr || result.stdout}`);
 }
 
 export function importSubmissionToKnowledge(project: Project, commitPath: string): void {
+  assertWritableProject(project);
   const script = knowledgeStoreScript(project);
   if (!existsSync(script)) throw new Error(`knowledge store script not found: ${script}`);
-  const result = spawnSync('python', [script, 'import-submission', storePaths(project).knowledgeRoot, commitPath], knowledgeProcessOptions());
+  const result = spawnSync('python', [script, 'import-submission', storePaths(project).knowledgeRoot, commitPath], {
+    ...knowledgeProcessOptions(), input: JSON.stringify({ target: targetRef(project), workspace_root: project.root }),
+  });
   if (result.status !== 0) throw new Error(`knowledge store import failed: ${result.stderr || result.stdout}`);
 }
 
@@ -163,6 +180,7 @@ export function listDbIntegrationEvents(project: Project): any[] {
 
 export function integrationChannel(project: Project): string {
   return [
+    ...(scopeKey(project) ? [scopeKey(project)] : []),
     project.config.execution.backend,
     project.suite.operator_abi,
     project.suite.revision,
@@ -176,16 +194,36 @@ export function claimDbIntegrationEvent(project: Project, eventId: string, token
   return result.claimed ? result.event : undefined;
 }
 
-export function finishDbIntegrationEvent(project: Project, eventId: string, status: string, resultRef?: string, error?: string): void {
-  runKnowledgeCommand(project, 'finish-event', { event_id: eventId, token: currentLeaseToken(project, eventId), status, result_ref: resultRef, error });
+export function finishDbIntegrationEvent(project: Project, eventId: string, status: string, resultRef?: string, error?: string, retryable?: boolean, errorClass?: string): void {
+  runKnowledgeCommand(project, 'finish-event', {
+    event_id: eventId,
+    token: currentLeaseToken(project, eventId),
+    status,
+    result_ref: resultRef,
+    error,
+    ...(retryable === undefined ? {} : { retryable }),
+    ...(errorClass === undefined ? {} : { error_class: errorClass }),
+  });
 }
 
-export function finishDbIntegrationEventWithToken(project: Project, eventId: string, token: string, status: string, resultRef?: string, error?: string): void {
-  const result = runKnowledgeCommand(project, 'finish-event', { event_id: eventId, token, status, result_ref: resultRef, error });
+export function finishDbIntegrationEventWithToken(project: Project, eventId: string, token: string, status: string, resultRef?: string, error?: string, retryable?: boolean, errorClass?: string): void {
+  const result = runKnowledgeCommand(project, 'finish-event', {
+    event_id: eventId,
+    token,
+    status,
+    result_ref: resultRef,
+    error,
+    ...(retryable === undefined ? {} : { retryable }),
+    ...(errorClass === undefined ? {} : { error_class: errorClass }),
+  });
   if (result.ok === false) throw new Error(String(result.error || 'integration lease finish failed'));
 }
 
 export interface StoreMaterial {
+  target?: TargetRef;
+  material_key?: string;
+  category?: 'research' | 'prediction_rule' | 'ir_technique';
+  applicability?: 'target' | 'hardware';
   material_id: string;
   kind: string;
   statement: string;
@@ -194,20 +232,27 @@ export interface StoreMaterial {
   last_novelty_event_at: string;
 }
 
-export function listDbMaterials(project: Project): StoreMaterial[] {
-  const result = runKnowledgeCommand(project, 'list-materials', { backend: project.config.execution.backend });
+export function listDbMaterials(project: Project, options: { all_targets?: boolean } = {}): StoreMaterial[] {
+  const result = runKnowledgeCommand(project, 'list-materials', { backend: project.config.execution.backend, ...options });
   return Array.isArray(result.materials) ? result.materials : [];
 }
 
 function runKnowledgeCommand(project: Project, command: string, payload: unknown): any {
+  assertWritableProject(project);
   const script = knowledgeStoreScript(project);
   if (!existsSync(script)) throw new Error(`knowledge store script not found: ${script}`);
   const result = spawnSync('python', [script, command, storePaths(project).knowledgeRoot], {
     ...knowledgeProcessOptions(),
-    input: JSON.stringify(payload),
+    input: JSON.stringify({ ...(payload as Record<string, unknown>), target: targetRef(project), workspace_root: project.root,
+      identity: { case_suite_revision: project.suite.revision, environment_ref: project.config.environment.environment_ref,
+        measurement_protocol_ref: project.config.environment.measurement_protocol_ref } }),
   });
   if (result.status !== 0) throw new Error(`knowledge store ${command} failed: ${result.stderr || result.stdout}`);
   return result.stdout.trim() ? JSON.parse(result.stdout) : { ok: true };
+}
+
+export function assertWritableProject(project: Project): void {
+  assertMigrationIdle(project);
 }
 
 function knowledgeProcessOptions() {
@@ -229,6 +274,10 @@ function knowledgeStoreScript(project: Project): string {
     join(dirname(fileURLToPath(import.meta.url)), '..', '..'),
   ].filter((value): value is string => Boolean(value));
   const found = roots.map(root => join(root, 'knowledge', 'store.py')).find(path => existsSync(path));
+  if (isWorkspace(project) && project.snapshotRoot) {
+    const config = readJson<{ schema_version: number }>(join(project.snapshotRoot, 'meteor.config.json'));
+    assert(config.schema_version === 2, 'Legacy research snapshots cannot write a workspace catalog');
+  }
   return found ?? join(project.root, 'knowledge', 'store.py');
 }
 

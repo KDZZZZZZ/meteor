@@ -1,22 +1,31 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Project } from '../templates/project/tools/meteor/contracts.ts';
 import { hashObject, inside, readJson, sha256, writeJson } from '../templates/project/tools/meteor/util.ts';
+import { isWorkspace, targetFile, targetPath } from '../templates/project/tools/meteor/workspace.ts';
 
 /** Materialize the shipped draft suite once; never replace a user's fixed suite. */
 export async function prepareDefaultCases(project: Project, signal?: AbortSignal) {
   const wide = project.suite.revision === 'draft-qmq-v1-wide-0001';
   if (!wide && project.suite.revision !== 'mock-qmq-v1-suite-0001') return { changed: false };
-  const driver = join(project.root, 'tools/meteor/runners/remote');
-  const verifierHash = sha256(readFileSync(join(driver, 'verify_case.py')));
+  const adapter = isWorkspace(project) ? readJson(targetFile(project, 'adapter_ref')) : undefined;
+  const driver = inside(project.snapshotRoot ?? project.root, adapter?.remote_runtime_ref ?? 'tools/meteor/runners/remote');
+  const generator = adapter ? inside(project.snapshotRoot ?? project.root, adapter.generator_ref) : join(driver, 'gen_case.py');
+  const verifier = adapter ? targetFile(project, 'oracle_ref') : join(driver, 'verify_case.py');
+  const verifierHash = sha256(readFileSync(verifier));
+  const generatorHash = sha256(readFileSync(generator));
   const cases = [];
   for (const item of project.suite.cases) {
     signal?.throwIfAborted();
     const { seed, mode } = item.generation ?? { seed: 42, mode: 'random' };
     if (!Number.isSafeInteger(seed) || seed < 0 || !['random', 'zero-row', 'all-zero'].includes(mode)) throw new Error('Invalid case generation settings: ' + item.case_id);
-    const dataRef = 'cases/' + item.case_id + '-seed' + seed + (mode === 'random' ? '' : '-' + mode);
+    const generationKey = hashObject({ target: project.scope, shape: item.shape, dtype: item.dtype, layout: item.layout,
+      seed, mode, generatorHash, verifierHash, adapter }).slice(0, 24);
+    const dataRef = isWorkspace(project)
+      ? relative(project.root, targetPath(project, 'cases', project.suite.revision, 'inputs', item.case_id + '-' + generationKey)).replaceAll('\\', '/')
+      : 'cases/' + item.case_id + '-seed' + seed + (mode === 'random' ? '' : '-' + mode);
     const directory = inside(project.root, dataRef);
     if (!existsSync(join(directory, 'case.json'))) {
       const parent = dirname(directory);
@@ -24,7 +33,7 @@ export async function prepareDefaultCases(project: Project, signal?: AbortSignal
       const staging = mkdtempSync(join(parent, '.meteor-case-'));
       try {
         await new Promise<void>((complete, fail) => {
-          const child = spawn(process.env.METEOR_PYTHON ?? 'python', [join(driver, 'gen_case.py'),
+          const child = spawn(process.env.METEOR_PYTHON ?? 'python', [generator,
             '--m', String(item.shape.m), '--n', String(item.shape.n), '--k', String(item.shape.k),
             '--seed', String(seed), '--mode', mode, '--output', staging],
           { windowsHide: true, signal, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });

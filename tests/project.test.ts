@@ -15,7 +15,7 @@ test('init is idempotent, preserves human changes, and starts unconfigured by de
   assert.equal(first.state, 'setup_required');
   assert.equal(first.execution_backend, 'unconfigured');
   assert(isAbsolute(first.template_root));
-  assert(existsSync(join(first.template_root, 'asc/case-suite.json')));
+  assert(existsSync(join(first.template_root, 'cases/qmq-v1/int8/default/suite.json')));
   assert(first.created.includes('meteor.config.json'));
   const second = initProject(root, { git: false });
   assert.equal(second.created.length, 0);

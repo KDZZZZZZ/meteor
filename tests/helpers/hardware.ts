@@ -3,7 +3,10 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { delimiter, join, relative } from 'node:path';
 import { hashObject, readJson, sha256, writeJson } from '../../templates/project/tools/meteor/util.ts';
-import { hardwareEnvironmentRef, SSH_MEASUREMENT_PROTOCOL_REF } from '../../templates/project/tools/meteor/hardware.ts';
+import { hardwareEnvironmentRef, SSH_MEASUREMENT_PROTOCOL_REF, workspaceHardwareIdentity } from '../../templates/project/tools/meteor/hardware.ts';
+import { writeExecutionModelFixture } from './execution-model.ts';
+import { loadProject } from '../../src/project.ts';
+import { configureAssemblyTemplate } from '../../templates/project/tools/meteor/assembly-template.ts';
 
 export const fixtureProfileRef = 'fixture-only-no-connection';
 
@@ -78,10 +81,18 @@ export function writeReadyHardwareFixture(
     profile_hash: hashObject(profile),
     result,
   };
-  const reportPath = join(root, 'reports', 'meteor', 'ssh', 'hardware', `${options.reportId ?? 'unit-fixture'}.json`);
+  const config = readJson(join(root, 'meteor.config.json'));
+  const reportPath = config.schema_version === 2
+    ? join(root, 'hardware', 'reports', options.reportId ?? 'unit-fixture', 'report.json')
+    : join(root, 'reports', 'meteor', 'ssh', 'hardware', `${options.reportId ?? 'unit-fixture'}.json`);
   writeJson(reportPath, report);
   const reportRef = relative(root, reportPath).replaceAll('\\', '/');
   const reportHash = hashObject(report);
+  if (config.schema_version === 2) {
+    const identity = workspaceHardwareIdentity(result);
+    writeJson(join(root, config.workspace.hardware_ref), { schema_version: 1, state: 'bound',
+      hardware_id: 'hw-' + hashObject(identity).slice(0, 24), ...identity, report_ref: reportRef });
+  }
   const device = (result as any).selected_device ?? {};
   writeJson(join(root, '.meteor.local.json'), {
     execution: { backend: 'ssh', profile_ref: profileRef },
@@ -98,6 +109,13 @@ export function writeReadyHardwareFixture(
       npu_arch: device.npu_arch,
     },
   });
+  if (config.schema_version === 2) {
+    writeExecutionModelFixture(root, readJson(join(root, '.meteor.local.json')).environment.environment_ref);
+    for (const target of config.targets) {
+      const project = loadProject(root, target);
+      configureAssemblyTemplate(project, { source_path: target.template_ref + '/version.asc.tmpl', template_id: 'explicit-test-template' });
+    }
+  }
   return { report, reportRef, reportPath, reportHash, profileHash: hashObject(profile) };
 }
 
@@ -154,7 +172,7 @@ export function emptyHardwareProfiles(t: TestContext, root: string) {
 // Unit fixture only: materializes tiny pinned case files so research-start tests do not depend on Python/NumPy.
 export function materializeUnitCaseSuite(root: string, revision = 'unit-hardware-suite') {
   const config = readJson<any>(join(root, 'meteor.config.json'));
-  const suitePath = join(root, config.case_suite);
+  const suitePath = join(root, config.schema_version === 2 ? config.targets[0].case_suite_ref : config.case_suite);
   const suite = readJson<any>(suitePath);
   const verifier = readFileSync(join(root, 'tools', 'meteor', 'runners', 'remote', 'verify_case.py'));
   const cases = suite.cases.map((item: any, index: number) => {

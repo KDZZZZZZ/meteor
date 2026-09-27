@@ -53,7 +53,7 @@ Important result fields:
 - `validation.runtime_discovery`: results of the host-side ACL/platform query; `validation.device_execution`: the minimal add's device-task evidence.
 - `supported_metrics`, `cann`, `tools`, `probe`, `logs`: implemented metric names, tool discovery and original evidence.
 
-Chief's tool saves immutable JSON and readable Markdown reports under `reports/meteor/ssh/hardware/`, returns `hardware_report_ref`, `hardware_report_path`, `hardware_ready`, `state` and `case_setup`, and configures measured environment fields only after validation. A hardware-ready result can still need case-suite setup before `state: "ready_ssh"`. This add probe establishes environment readiness; each candidate kernel needs its own correctness and device-execution evidence.
+Chief's tool saves immutable JSON and readable Markdown reports under `hardware/reports/<probe_id>/`, returns `hardware_report_ref`, `hardware_report_path`, `hardware_ready`, `state` and `case_setup`, and binds the workspace hardware and measured environment fields only after validation. A different SoC/architecture requires a separate workspace. A hardware-ready result can still need case-suite setup before `state: "ready_ssh"`. This add probe establishes environment readiness; each candidate kernel needs its own correctness and device-execution evidence. Legacy schema 1 reports retain their original paths.
 
 ### Build request
 
@@ -192,6 +192,10 @@ production SSH execution and inherited-descriptor recovery target Linux.
 ```
 
 For hardware, build, test and profile actions, repeating the same `request_id` with the same payload returns the previous result when finished, or its running/unknown state while work remains active. Repeating it with a different payload fails. The SSH transport assigns a new request ID to a new measurement unless the caller supplies an idempotency key; replaying an existing request does not produce another independent measurement.
+
+An exception during a queued action returns `ok:false` together with its structured `result`. After ticket release is confirmed, the result is durably `FAILED` with queue timing and `remote_release_confirmed:true`; the first response and later collection contain the same evidence. If release cannot be confirmed, the response remains `UNKNOWN_REMOTE` with `remote_release_confirmed:false` and no terminal result is written. Poll or collect the original request. A failure envelope cannot carry a successful result, and missing release evidence is not proof of release.
+
+Command timeouts retain a `failed_command` log with the command, the last 20,000 characters of each output stream, timeout limit, elapsed command duration and exit code after cleanup. Case timeouts also include `failure_context`: the case and input/oracle identity, the `run`, `verify` or `device_witness` stage, and logs of preceding commands that returned. The cleanup exit code is not a normal application failure code. These are diagnostics, not PASS rows, device witnesses or eligible timing samples. A profiler timeout can therefore retain earlier execution/verification output without promoting the failed request to success. The same diagnostics survive collection of the original request; uncertain release still prevents a durable terminal result. Older receipts without these fields remain unchanged.
 
 ## Timing Contract
 

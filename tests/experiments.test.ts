@@ -22,7 +22,7 @@ function write(path: string, text: string): void {
 
 function makeProject(backend: 'mock' | 'ssh' = 'mock'): Project {
   const root = mkdtempSync(join(tmpdir(), 'meteor-exp-'));
-  cpSync(join(process.cwd(), 'templates/project/asc'), join(root, 'asc'), { recursive: true });
+  cpSync(join(process.cwd(), 'templates/project/templates/qmq-v1/int8'), join(root, 'asc'), { recursive: true });
   const preamble = '#define METEOR_TEST_PREAMBLE 1\n';
   const shared = 'static inline int meteor_shared_answer() { return 42; }\n';
   write(join(root, 'common/preamble.inc'), preamble);
@@ -94,7 +94,7 @@ function activate(project: Project, researchId: string): void {
 test('mock full test writes deterministic complete receipt with explicit unsupported rows', async () => {
   const project = makeProject();
   activate(project, 'rA');
-  const build = await buildKernel(project, { research_id: 'rA', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
+  const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rA', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
   const buildRef = slash(relative(project.root, join(project.dataRoot, 'research/rA/experiments/e1/builds', `${build.build_id}.json`)));
   const receipt = await testKernel(project, { build_ref: buildRef, mode: 'full' });
 
@@ -118,7 +118,7 @@ test('missing candidate manifest reports how to create it without consuming an e
   const manifestPath = join(project.root, 'kernels/demo/r1/kernel.json');
   const manifest = readFileSync(manifestPath, 'utf8');
   rmSync(manifestPath);
-  const input = { research_id: 'repair-missing-manifest', experiment_id: 'e1', kernel_path: 'kernels/demo/r1/kernel.json' };
+  const input = { fixture: { fixture_id: 'protocol-unit' }, research_id: 'repair-missing-manifest', experiment_id: 'e1', kernel_path: 'kernels/demo/r1/kernel.json' };
   await assert.rejects(buildKernel(project, input), /manifest missing:.*kernel\.json.*Create kernel\.json.*retry this experiment/);
   assert.equal(existsSync(join(project.dataRoot, 'research', input.research_id, 'experiments')), false);
   writeFileSync(manifestPath, manifest);
@@ -132,7 +132,7 @@ test('missing candidate sources report how to repair without consuming an experi
   const hostPath = join(project.root, 'kernels/demo/r1/host.asc');
   const hostSource = readFileSync(hostPath, 'utf8');
   rmSync(hostPath);
-  const input = { research_id: 'repair-missing-source', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
+  const input = { fixture: { fixture_id: 'protocol-unit' }, research_id: 'repair-missing-source', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
   await assert.rejects(buildKernel(project, input), /source files missing:.*host\.asc.*retry this experiment/);
   assert.equal(existsSync(join(project.dataRoot, 'research', input.research_id, 'experiments')), false);
   writeFileSync(hostPath, hostSource);
@@ -146,7 +146,7 @@ test('missing candidate dependency reports how to repair without consuming an ex
   const dependencyPath = join(project.root, 'common/shared.inc');
   const dependencySource = readFileSync(dependencyPath, 'utf8');
   rmSync(dependencyPath);
-  const input = { research_id: 'repair-missing-dependency', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
+  const input = { fixture: { fixture_id: 'protocol-unit' }, research_id: 'repair-missing-dependency', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
   await assert.rejects(buildKernel(project, input), /source files missing:.*common\/shared\.inc.*dependency sources.*retry this experiment/);
   assert.equal(existsSync(join(project.dataRoot, 'research', input.research_id, 'experiments')), false);
   writeFileSync(dependencyPath, dependencySource);
@@ -161,7 +161,7 @@ test('unknown supported case ids report valid fixed suite ids without consuming 
   const module = JSON.parse(readFileSync(manifestPath, 'utf8')) as KernelModule;
   module.supported_case_ids = ['c1', 'qmq_i8_16_32_64'];
   writeFileSync(manifestPath, JSON.stringify(module, null, 2) + '\n');
-  const input = { research_id: 'repair-unknown-case', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
+  const input = { fixture: { fixture_id: 'protocol-unit' }, research_id: 'repair-unknown-case', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
   await assert.rejects(
     buildKernel(project, input),
     /unknown case id\(s\): qmq_i8_16_32_64.*Valid case_ids.*c1.*c2.*legal subset.*No device build or experiment receipt/,
@@ -175,7 +175,7 @@ test('unknown supported case ids report valid fixed suite ids without consuming 
 test('probe mode never masquerades as full accounting', async () => {
   const project = makeProject();
   activate(project, 'rA');
-  const build = await buildKernel(project, { research_id: 'rA', experiment_id: 'e2', kernel_path: 'kernels/demo/r1' });
+  const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rA', experiment_id: 'e2', kernel_path: 'kernels/demo/r1' });
   const buildRef = slash(relative(project.root, join(project.dataRoot, 'research/rA/experiments/e2/builds', `${build.build_id}.json`)));
   const receipt = await testKernel(project, { build_ref: buildRef, mode: 'probe', case_ids: ['c1'] });
 
@@ -187,18 +187,18 @@ test('probe mode never masquerades as full accounting', async () => {
 test('stale build_ref is rejected after kernel source changes', async () => {
   const project = makeProject();
   activate(project, 'rB');
-  const build = await buildKernel(project, { research_id: 'rB', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
+  const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rB', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
   const buildRef = slash(relative(project.root, join(project.dataRoot, 'research/rB/experiments/e1/builds', `${build.build_id}.json`)));
   write(join(project.root, 'kernels/demo/r1/host.asc'), 'MeteorStatus demo_launch(const MeteorCall&, const MeteorShape&, const MeteorResources&) { return MeteorStatus::Unsupported; }\n');
 
   await assert.rejects(() => testKernel(project, { build_ref: buildRef, mode: 'full' }), /Stale build_ref/);
-  await assert.rejects(() => buildKernel(project, { research_id: 'rB', experiment_id: 'e2', kernel_path: 'kernels/demo/r1' }), /assign a new revision/);
+  await assert.rejects(() => buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rB', experiment_id: 'e2', kernel_path: 'kernels/demo/r1' }), /assign a new revision/);
 });
 
 test('kernel.json path and module directory produce the same immutable build identity', async () => {
   const project = makeProject();
   activate(project, 'rPath');
-  const input = { research_id: 'rPath', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
+  const input = { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rPath', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' };
   const directory = await buildKernel(project, input);
   const file = await buildKernel(project, { ...input, kernel_path: input.kernel_path + '/kernel.json' });
   assert.deepEqual(file, directory);
@@ -225,7 +225,7 @@ test('failed mock build records NOT_RUN test rows instead of passing', async () 
 test('fixture cannot force PASS for unsupported case', async () => {
   const project = makeProject();
   activate(project, 'rUnsupported');
-  const build = await buildKernel(project, { research_id: 'rUnsupported', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
+  const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rUnsupported', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
   const buildRef = slash(relative(project.root, join(project.dataRoot, 'research/rUnsupported/experiments/e1/builds', `${build.build_id}.json`)));
   const receipt = await testKernel(project, {
     build_ref: buildRef,
@@ -241,19 +241,19 @@ test('fixture cannot force PASS for unsupported case', async () => {
 test('immutable build receipts detect corruption on idempotent rebuild', async () => {
   const project = makeProject();
   activate(project, 'rC');
-  const build = await buildKernel(project, { research_id: 'rC', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
+  const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rC', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
   const buildPath = join(project.dataRoot, 'research/rC/experiments/e1/builds', `${build.build_id}.json`);
   const corrupted = JSON.parse(readFileSync(buildPath, 'utf8'));
   corrupted.artifact_hash = 'corrupted';
   writeFileSync(buildPath, JSON.stringify(corrupted, null, 2) + '\n');
 
-  await assert.rejects(() => buildKernel(project, { research_id: 'rC', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' }), /Immutable record conflict/);
+  await assert.rejects(() => buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rC', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' }), /Immutable record conflict/);
 });
 
 test('profile receipts bind exact cases and metrics', async () => {
   const project = makeProject();
   activate(project, 'rD');
-  const build = await buildKernel(project, { research_id: 'rD', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
+  const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rD', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
   const buildRef = slash(relative(project.root, join(project.dataRoot, 'research/rD/experiments/e1/builds', `${build.build_id}.json`)));
   const receipt = await profileKernel(project, { build_ref: buildRef, case_ids: ['c1'], metrics: ['l2_transactions'] });
 
@@ -280,8 +280,12 @@ test('assembly renders template slots without rewriting module symbols', () => {
     routes: [{ rule_id: 7, implementation_id: 1, case_ids: ['c1'] }],
   });
   assert.match(version, /return \{7U, 1U\};/);
-  assert.match(version, /case 1U:/);
-  assert.match(version, /status = demo_launch\(call, shape, resources\);/);
+  assert.match(version, /METEOR_BUCKET\(7U, 1U, "c1"\)/);
+  assert.match(version, /METEOR_IMPLEMENTATION\(1U, demo_launch, "demo@r1"\)/);
+  assert.match(version, /#define METEOR_IMPLEMENTATION\(ID, LAUNCHER, LABEL\)/);
+  assert.match(version, /case ID:/);
+  assert.match(version, /status = LAUNCHER\(call, shape, resources\);/);
+  assert.doesNotMatch(version, /\{\{/);
   assert.throws(() => renderVersion(project, {
     assembly_key: 'partial-shape',
     implementations: [{ implementation_id: 1, module }],
@@ -305,7 +309,7 @@ test('assembly renders template slots without rewriting module symbols', () => {
 test('mock backend does not write ssh evidence or fabricate real execution', async () => {
   const project = makeProject('mock');
   activate(project, 'rE');
-  const build = await buildKernel(project, { research_id: 'rE', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
+  const build = await buildKernel(project, { fixture: { fixture_id: 'protocol-unit' }, research_id: 'rE', experiment_id: 'e1', kernel_path: 'kernels/demo/r1' });
   assert.equal(build.execution_backend, 'mock');
   assert.equal(build.simulated, true);
   assert.equal(slash(project.dataRoot).endsWith('reports/meteor/mock'), true);

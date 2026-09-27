@@ -37,6 +37,20 @@
 
 固定 case suite、输入生成/seed、oracle、dtype、布局、误差要求、源码/构建及设备身份。探针测试用于调试；交付 revision 的 full 测试必须覆盖 suite 每个 case 的终态。suite 只有四个 case 时，“全尺寸”只表示这四个 case 已完整处理；不能推导它们围成的 shape 区间已被验证。
 
+### 当前 SSH 回执的三个时间来源
+
+先核对回执字段和 `measurement_kind`，不要只按数值大小猜计时范围。当前 [driver.py](../../../../tools/meteor/runners/remote/driver.py) 先普通运行并验证，再另启一次 msprof 运行收集设备见证；两次运行的样本不能按数组位置当成同一次调用。
+
+| 字段 | 当前来源与聚合 | 分析边界 |
+| --- | --- | --- |
+| 测试行 `samples_us` / `median_us`；profile 的 `kernel_time_us`（`acl_event_interval`） | 普通运行中排除预热后的 ACL event 样本及其中位数 | 测量 start/stop event 之间的间隔；检查实际 launch 路径，区间内的资源申请、提交延迟等可能影响它，不能直接当成纯设备计算时间 |
+| `device_execution.matched_tasks[*].task_duration_us` | 另一次 msprof 运行中匹配目标 kernel 的 `Task Duration(us)` 原始字段 | 可包含预热任务；任务见证本身不标记第几次计时重复，需核对该二进制的调用顺序、stream/task ID、时间戳和原始记录，不能无依据丢弃前三行 |
+| profile 的 `device_task_time_us`（`msprof_task_duration`） | 当前工具对见证列表中可解析的任务时长取中位数 | 当前未自动剔除预热，见证列表最多保留 20 条；不是全部调用的完整统计，也不是 ACL event 时间或纯核上指令时间 |
+
+Host launch 内存在 `aclrtMalloc`，只能说明要检查它与 event 的相对位置，不能据此声称某条 msprof kernel 任务时长包含该 API 的总耗时。也不能把两次运行的 event/task 中位数相减，直接命名为实测 Host 或分配开销。比较性能时两臂使用相同 case、相同字段及相同样本筛选/聚合规则；自行从任务记录剔除预热得到的统计，应另列筛选依据，不冒充工具直接返回的 `device_task_time_us`。
+
+单位换算保留测量来源：`1 s = 1000 ms = 1000000 us`，因此 `us / 1000` 得到 ms，`us / 1000000` 得到 s。例如 `1500000 us = 1500 ms = 1.5 s`，不能写成千秒级。换算只改变数值与单位，不会把 ACL event 变成 msprof 设备任务时间。计算比值前先统一两臂的单位，再核对字段口径、case 与样本条件；摘要的数量级要能从原始表格复算。
+
 ### 设备 kernel 时间
 
 1. 在计时区间外完成构建、资源申请和 H2D；输入在设备就绪。
@@ -53,7 +67,31 @@
 
 只对正确且有效执行的 case 报告性能。UNSUPPORTED 表示实现不支持该 case，不能算正确性通过或触发另一个 kernel fallback。实现支持域、已测 case、推荐 case、资源上限分别陈述；源码中的缓冲区上限不等于该范围已经通过验证。
 
+### 失败状态与超时阶段
+
+按原请求、错误点名的命令、queue/status 和实际 runner 版本判断失败阶段。当前 [driver.py](../../../../tools/meteor/runners/remote/driver.py) 的 `dispatch` 先进入 `ExecutionQueue`，取得执行槽位后才调用 handler；`run_command` 随具体子进程启动超时计时。队列等待不计入这个子进程的 900 秒，研究墙钟、传输等待和命令超时各自保留原含义。
+
+预算估算也按命令边界展开：当前普通 `qmq_remote_main` 与后续 msprof 是两个独立命令，各自有 900 秒限额，中间的验证命令为 300 秒。协议 warmup=3、repetitions=5 时，每次程序运行通常有 8 次 launch；普通运行加另一次 msprof 可合计 16 次，但不属于同一个 900 秒计时器。核对实际入口及算法 pass 数，再把“每乘积纳秒”等模型系数换算成单次/单命令/整批秒数；初始化、同步和 profiling 开销另列，预测不冒充未执行 case 的实测超时或硬件不可执行结论。
+
+| 证据 | 能确定的范围 | 仍需保留的未知 |
+| --- | --- | --- |
+| 研究墙钟拒绝新实验，未派发请求 | 本次调用没有启动新实验；已在预算内发起的请求另行追踪 | 不能据此取消、重开或补造旧请求结果 |
+| 原请求明确处于 queued，附 `queue.wait_seconds` | 该请求当时在等执行槽位；等待不属于 kernel 延迟 | 其它请求的等待时间不能代替它的队列状态 |
+| `Command '[...qmq_remote_main, ...case参数]' timed out after 900 seconds` | 已进入这个算子宿主程序的子进程等待阶段；它未在命令限额内退出 | 不能仅凭这一行确定卡在 ACL 初始化、分配/拷贝、launch、同步或具体设备指令，也不能说全程在等 FIFO |
+| 错误点名 `msprof`、验证器、编译器等命令 | 该命令阶段超时；结合命令参数和已有结果继续定位 | profile 入口也会先执行普通算子和验证，不能仅按 action=profile 把所有超时归到 profiler |
+| SSH/传输失联，或远端释放状态未知 | 本地未收到足够的终态或释放证据 | 原远端任务可能仍在运行；通过原请求的控制入口追踪，不换 ID 重跑 |
+
+旧失败响应可能在异常传播时丢失 queue、stdout/stderr；日志没有 `QMQ_RUN` 或某字段，不证明二进制未启动。测试总操作失败后补齐的 `rows[].status=NOT_RUN` 表示没有该 case 的有效结果，不能反推其物理执行历史；保留 `accounting_complete=false`，不把这些行计作通过或实际设备失败次数。`device_execution.status` 则描述采集见证，需与测试行状态分开解释。
+
+把报告中的推断与观察分开：长队列可能增加总墙钟，但上述错误不证明“排队饥饿是唯一根因”或“kernel/设备健康”。同窗其它任务通过也只证明那些任务的对应执行。释放未知时以原请求的状态/回执确认；新探针成功、后续 ticket 推进或源码中存在清理分支，均不能替代该请求的释放证据。保持设备 FIFO 串行，不绕队列或增大并发来诊断超时。
+
+新版 driver 的超时 raw 回执保留 `failed_command`：实际命令、stdout/stderr 各最后 20,000 字符、命令限额与耗时。`failure_context` 标明 case、input/oracle hash、阶段 `run` / `verify` / `device_witness` 和此前已返回的 `completed_commands.run/verify`。先检查这些字段，再结合 queue 判断；编译等非 case 命令可能只有 `failed_command`。`returncode` 是超时清理后的进程退出码，不是正常结束的应用错误码，`duration_seconds` 也不是 kernel 延迟。旧回执缺字段时仍保留未知。
+
+这些字段只保留失败诊断，不生成 PASS 行或可提交的计时样本。即使 msprof 超时前普通 run/verify 已返回 0，设备见证仍未完成；不能据此越过提交门槛或推断 profiler、kernel、设备中的唯一根因。原失败仍按释放证据保持 FAILED 或 UNKNOWN_REMOTE，通过原 request_id 收取；不为了补日志自动重跑实验。
+
 ## 4. 验证实际设备任务
+
+用小 case 作设备健康探针时，先核对它属于当前 build 的 `supported_case_ids`。driver 对不支持的 case 直接记 `UNSUPPORTED` 并跳过 `execute_case`；顶层 `COMPLETED`、短耗时与队列释放仅说明该请求处理结束，不证明设备 kernel 已执行。设备健康判据应关联本次 PASS、有效样本及目标任务的 CONFIRMED 见证；未满足时不能将“健康门已通过”写入摘要，再在 limitations 中说它未启动设备。后续其它 case 通过可作为那些 case 的证据，不回填原探针；另一次请求是否发起仍遵守预算与原请求状态约束。
 
 普通 `msprof` 适合建立算子任务、运行时 API 和设备时序的关联。CANN 9.0 支持以下命令形态；实际工具调用由 runner 管理，示例不要求 Agent 绕过工具另开远端进程：
 
@@ -83,9 +121,11 @@ msprof --output=<本次独立输出目录> \
 
 即使有匹配任务，仍需结合真实 Host/Device 路径排除 CPU 替算和占位 kernel。profiler 证明一个设备任务发生过，不能单独证明目标计算全部发生在该任务中。
 
+当前 Meteor 的 `CONFIRMED` 来自任务名称、设备与 Task Type 的匹配；它没有解析单条指令。`AI_VECTOR_CORE`、匹配任务数或正确性 PASS 不能单独证明某条 Add/Cast 被保留并执行，也不能证明它位于哪一段循环。关于指令存活或分支执行的命题，要另行关联精确构建及能够区分该活动的证据；仅有任务见证时如实保留这部分未知。
+
 探测或候选 kernel 写回错误时，检查 GM/UB 数据流与同步。`GlobalTensor::SetValue` 的标量写可能留在每核 DataCache，不能把 D2H 读到旧值直接归因于设备故障；同一 cache line 的多核写还可能相互覆盖。模板 add 探针参考官方 Add 的 `DataCopy → Add → DataCopy`，使用 TPipe 事件完成 MTE2/V/MTE3 依赖。缓存 API 的支持随产品变化，先核对本机版本。[官方 Add 示例][sample-pinned]、[同步 API][events]、[标量访存说明][scalar-cache]
 
-采集状态要如实区分：`NOT_RUN` 表示前置编译或正确性失败，profiler 尚未运行；`UNAVAILABLE` 表示工具不可用；采集运行失败或成功但没有匹配任务应分别依据日志说明，不能合并成“没有设备执行”。
+设备见证的采集状态要如实区分：`device_execution.status=NOT_RUN` 连同 reason 解释，例如前置正确性失败时尚未启动 profiler；它不能反推整个算子进程未启动。`UNAVAILABLE` 表示工具不可用。采集运行失败或成功但没有匹配任务应分别依据日志说明，不能合并成“没有设备执行”，也不要与测试行 `rows[].status` 混为一谈。
 
 启动普通 msprof 时按本机 `--help` 使用位置参数 `msprof [选项] <app> [app arguments]`；从 Python 用 argv 列表传入每个参数，避免包装脚本将带空格的 `--application` 值重新拆开。若本机版本仅支持另一种入口，以其帮助和对应版本文档为准，记录实际命令。
 

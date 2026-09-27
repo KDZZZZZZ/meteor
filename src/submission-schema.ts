@@ -2,6 +2,10 @@ const nonEmptyString = { type: 'string', minLength: 1 };
 const stringValue = { type: 'string' };
 const stringList = { type: 'array', items: stringValue };
 const nonEmptyStringList = { type: 'array', minItems: 1, items: stringValue };
+const measuredEvidenceRefs = {
+  ...stringList,
+  description: 'Include exact receipt paths returned as test_ref, performance_data_ref or profile_ref, or an exact experiment_id from experiments with its receipt references populated. Both probe and full test receipts can support a hypothesis verdict. Paths embedded in narrative sentences are not resolved; put explanations in experiments[].analysis or chief_report. Build and design-comparison artifacts do not replace measurements.',
+};
 const kernelRefSchema = {
   type: 'object',
   additionalProperties: false,
@@ -35,8 +39,8 @@ const hypothesisSchema = {
     confounders: stringList,
     measurement_plan: nonEmptyString,
     verdict: { type: 'string', enum: ['SUPPORTED', 'REFUTED', 'INCONCLUSIVE'] },
-    supporting_evidence: stringList,
-    counterevidence: stringList,
+    supporting_evidence: measuredEvidenceRefs,
+    counterevidence: measuredEvidenceRefs,
     limitations: stringList,
     simulated_verdict: { type: 'string', enum: ['SUPPORTED', 'REFUTED', 'INCONCLUSIVE'] },
   },
@@ -58,8 +62,8 @@ const experimentSchema = {
     controls: stringList,
     kernel_revisions: { type: 'array', items: kernelRefSchema },
     environment_ref: nonEmptyString,
-    full_size_test_refs: stringList,
-    profile_refs: stringList,
+    full_size_test_refs: { ...stringList, description: 'Exact test receipt paths for this experiment. Despite this legacy field name, probe receipts are also accepted here for hypothesis evidence. Formal submitted kernels separately require mode:full.' },
+    profile_refs: { ...stringList, description: 'Exact profile receipt paths, or [] when no independent profile was run. A probe test remains test evidence and does not need a profile to make its reference valid.' },
     analysis: nonEmptyString,
     next_experiment: nonEmptyString,
   },
@@ -80,13 +84,13 @@ const kernelSubmissionSchema = {
     kernel_id: nonEmptyString,
     revision: nonEmptyString,
     source_hash: nonEmptyString,
-    artifact_refs: nonEmptyStringList,
+    artifact_refs: { ...nonEmptyStringList, description: 'Include the measured kernel module manifest (kernel.json) returned by the build, in addition to any other artifact references.' },
     supported_domain: nonEmptyString,
     verified_case_ids: nonEmptyStringList,
-    recommended_domain: nonEmptyString,
+    recommended_domain: { ...nonEmptyString, description: 'Describe the same applicability scope explicitly enumerated in recommended_case_ids; prose does not extend that set.' },
     recommended_case_ids: {
       ...nonEmptyStringList,
-      description: 'Verified PASS cases where this kernel is eligible for automatic integration. This is an applicability recommendation, not a claim of speedup or a supported hypothesis. A correct baseline may be submitted with explicit performance limitations.',
+      description: 'The exact allowlist for automatic integration: only these verified PASS cases are eligible. If all verified cases are recommended, enumerate all of them; do not substitute the smaller profile or hypothesis comparison sample. recommended_domain prose cannot add omitted cases. This is applicability, not a claim of speedup or a supported hypothesis. A correct baseline may be submitted with explicit performance limitations.',
     },
     hardware_scope: nonEmptyString,
     resource_constraints: stringList,
@@ -110,6 +114,21 @@ const knowledgeUpdateSchema = {
   properties: {
     claim_id: nonEmptyString,
     kind: { type: 'string', enum: ['observation', 'mechanism', 'hypothesis', 'counterexample'] },
+    category: { type: 'string', enum: ['research', 'prediction_rule', 'ir_technique'], description: 'Research findings, reusable HW prediction rules, or IR authoring techniques. Defaults to research.' },
+    applicability: { type: 'string', enum: ['target', 'hardware'], description: 'Legacy scope field: hardware maps to hardware, target or omission maps to dtype. Prefer scope_level; declarations do not independently prove scope-wide validity.' },
+    scope_level: { type: 'string', enum: ['hardware', 'op', 'dtype', 'shape'], description: 'Declared knowledge scope in this HW workspace. Legacy hardware applicability maps to hardware; otherwise the default is dtype. A scope declaration is not independent proof of every point in that scope.' },
+    shape_range: {
+      type: 'object', additionalProperties: false, required: ['shape_id', 'dimensions'],
+      description: 'Required only for shape scope. Stable range ID and explicit inclusive dimension bounds; never infer whole-range validation from one measured case.',
+      properties: {
+        shape_id: nonEmptyString,
+        dimensions: {
+          type: 'object', minProperties: 1,
+          additionalProperties: { type: 'object', additionalProperties: false, required: ['min', 'max'],
+            properties: { min: { type: 'integer', minimum: 1 }, max: { type: 'integer', minimum: 1 } } },
+        },
+      },
+    },
     statement: nonEmptyString,
     scope: nonEmptyString,
     evidence_refs: nonEmptyStringList,

@@ -122,7 +122,10 @@ static MeteorChoice meteor_choose_kernel(
     int64_t availableCoreNum)
 {
     // Generated after research submission from version.spec.json route rules.
-    {{ROUTE_SELECT_BODY}}
+    #define METEOR_BUCKET(RULE_ID, IMPLEMENTATION_ID, CASES) /* RULE_ID IMPLEMENTATION_ID CASES */
+    {{BUCKET_TABLE}}
+    #undef METEOR_BUCKET
+    {{ROUTE_FUNCTION_BODY}}
     return {0U, 0U};
 }
 
@@ -166,7 +169,12 @@ extern "C" void run_kernel(
     switch (choice.implementationId) {
         // Generated case arms call the corresponding module's host launcher.
         // Every case terminates with break; no fall-through or fallback route.
-        {{DISPATCH_CASES}}
+        #define METEOR_IMPLEMENTATION(ID, LAUNCHER, LABEL) \
+        case ID: \
+            status = LAUNCHER(call, shape, resources); \
+            break;
+        {{IMPLEMENTATION_TABLE}}
+    #undef METEOR_IMPLEMENTATION
         default:
             break;
     }

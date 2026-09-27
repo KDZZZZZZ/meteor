@@ -9,7 +9,7 @@ import { prepareDefaultCases } from '../src/cases.ts';
 import { hashObject, sha256, writeJson } from '../templates/project/tools/meteor/util.ts';
 
 test('default full-size matrix covers route boundaries and large shapes within its transport budget', () => {
-  const suite = JSON.parse(readFileSync(new URL('../templates/project/asc/case-suite.json', import.meta.url), 'utf8'));
+  const suite = JSON.parse(readFileSync(new URL('../templates/project/cases/qmq-v1/int8/default/suite.json', import.meta.url), 'utf8'));
   assert.equal(suite.cases.length, 192);
   const shapes = new Set(suite.cases.map((item: any) => Object.values(item.shape).join('x')));
   assert.equal(shapes.size, 192);
@@ -67,13 +67,13 @@ test('cancelled generation leaves the fixed suite unchanged and no partial case 
   const watchdog = setTimeout(() => controller.abort(), 5000);
   const monitor = setInterval(() => {
     const parent = join(root, 'cases');
-    if (existsSync(parent) && readdirSync(parent).some(name => existsSync(join(parent, name, 'partial.bin')))) controller.abort();
+    if (existsSync(parent) && readdirSync(parent, { recursive: true }).some(name => String(name).endsWith('partial.bin'))) controller.abort();
   }, 20);
   try {
     await assert.rejects(prepareDefaultCases(project, controller.signal), { name: 'AbortError' });
   } finally { clearTimeout(watchdog); clearInterval(monitor); }
   assert.deepEqual(readFileSync(join(root, project.config.case_suite)), before);
-  assert.deepEqual(readdirSync(join(root, 'cases')), []);
+  assert.equal(readdirSync(join(root, 'cases'), { recursive: true }).some(name => String(name).includes('.meteor-case-') || String(name).endsWith('case.json')), false);
 });
 
 test('existing case inputs cannot be silently reused with different generation metadata', async () => {

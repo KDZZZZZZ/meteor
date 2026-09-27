@@ -12,24 +12,41 @@ export interface Environment {
   device_id?: number; npu_arch?: string;
 }
 export interface MeteorConfig {
-  schema_version: 1;
+  schema_version: 1 | 2;
+  workspace?: { workspace_id: string; hardware_ref: string };
+  targets?: TargetRegistration[];
+  default_target?: { op_id: string; dtype_id: string };
+  legacy?: { config_ref: string; data_roots: string[] };
+  design?: { strategy: string; hardware_model_ref?: string; options?: Record<string, unknown> };
   execution: { backend: Backend; profile_ref: string };
   case_suite: string;
   environment: Environment;
   sampling: { epsilon: number; lambda: number; tau_hours: number; count: number };
   budget: { max_experiments: number; max_wall_time_seconds: number };
-  integration: { min_relative_improvement: number };
+  integration: { min_relative_improvement?: number }; // Legacy config field; exact-case selection uses the smallest valid median.
 }
-export interface Project { root: string; config: MeteorConfig; suite: CaseSuite; dataRoot: string; snapshotRoot?: string }
+export interface TargetRef { workspace_id: string; op_id: string; dtype_id: string }
+export interface AssemblyTemplateRegistration {
+  template_id: string; ref: string; sha256: string; source_ref: string; configured_at: string; slot_contract: 'meteor-version-slots-v1';
+}
+export interface TargetRegistration {
+  op_id: string; dtype_id: string; operator_abi: string;
+  contract_ref: string; oracle_ref: string; adapter_ref: string; template_ref: string; case_suite_ref: string;
+  assembly_template_ref?: string; assembly_template?: AssemblyTemplateRegistration;
+}
+export interface Project { root: string; config: MeteorConfig; suite: CaseSuite; dataRoot: string; snapshotRoot?: string;
+  target?: TargetRegistration; scope?: TargetRef }
 export interface KernelRef { kernel_id: string; revision: string }
 export interface Dependency { id: string; path: string; sha256: string; kind: 'preamble' | 'shared' }
 export interface KernelModule extends KernelRef {
+  target?: TargetRef;
   operator_abi: string; symbol_prefix: string; launcher: string;
   device_file: string; host_file: string; supported_case_ids: string[];
   dependencies: Dependency[]; hardware_scope: string; resource_constraints: string[];
 }
 export interface InitialContext {
   mode: 'random' | 'specified';
+  shape?: Record<string, number>;
   sampling?: { count?: number; seed?: number; epsilon?: number; lambda?: number; tau_hours?: number };
   kernel_refs?: string[];
   knowledge_refs?: string[];
@@ -41,6 +58,7 @@ export interface AssignedHypothesis {
   refutation_criteria?: string[]; confounders?: string[];
 }
 export interface ResearchRecord {
+  target?: TargetRef;
   research_id: string; agent_session_id: string; chief_id: string; execution_backend: Backend;
   case_suite_revision: string; environment_ref: string; measurement_protocol_ref: string;
   goal: string; run_status: RunStatus; created_at: string;
@@ -50,6 +68,7 @@ export interface ResearchRecord {
   initial_context?: InitialContext; assigned_hypothesis?: AssignedHypothesis;
 }
 export interface BuildReceipt {
+  target?: TargetRef; design_ref?: string; draft_source_hash?: string;
   build_id: string; research_id: string; experiment_id: string; kernel_ref: KernelRef;
   source_hash: string; artifact_hash: string; environment_ref: string;
   execution_backend: Backend; simulated: boolean; status: 'COMPLETED' | 'FAILED' | 'UNKNOWN_REMOTE';
@@ -69,6 +88,7 @@ export interface DeviceExecution {
   [key: string]: unknown;
 }
 export interface TestReceipt {
+  target?: TargetRef;
   run_id: string; research_id: string; experiment_id: string; kernel_ref: KernelRef;
   build_ref: string; source_hash: string; artifact_hash: string;
   execution_backend: Backend; simulated: boolean; fixture_id?: string;
@@ -99,11 +119,23 @@ export interface Experiment {
   controls: string[]; kernel_revisions: KernelRef[]; environment_ref: string;
   full_size_test_refs: string[]; profile_refs: string[]; analysis: string; next_experiment: string;
 }
-export interface KnowledgeUpdate {
+export type KnowledgeScopeLevel = 'hardware' | 'op' | 'dtype' | 'shape';
+export interface KnowledgeShapeRange {
+  shape_id: string;
+  dimensions: Record<string, { min: number; max: number }>;
+}
+export interface KnowledgeScope {
+  scope_level?: KnowledgeScopeLevel;
+  shape_range?: KnowledgeShapeRange;
+}
+export interface KnowledgeUpdate extends KnowledgeScope {
   claim_id: string; kind: 'observation' | 'mechanism' | 'hypothesis' | 'counterexample';
+  category?: 'research' | 'prediction_rule' | 'ir_technique';
+  applicability?: 'target' | 'hardware';
   statement: string; scope: string; evidence_refs: string[]; related_material_ids: string[];
 }
 export interface Submission {
+  target?: TargetRef;
   research_id: string; agent_session_id: string; execution_backend: Backend; termination_reason: string;
   hypothesis: Hypothesis; hypothesis_history: Array<{ hypothesis: Hypothesis; reason: string }>;
   experiments: Experiment[]; submitted_kernels: KernelSubmission[]; knowledge_updates: KnowledgeUpdate[];
@@ -111,6 +143,7 @@ export interface Submission {
 }
 export interface PreparedSubmission { prepared_submission_id: string; submission_hash: string; submission_ref: string }
 export interface ProfileReceipt {
+  target?: TargetRef; build_ref?: string;
   profile_id: string; research_id: string; experiment_id: string; kernel_ref: KernelRef;
   source_hash: string; environment_ref: string; execution_backend: Backend; simulated: boolean;
   fixture_id?: string; observations: Array<{ case_id: string; metric: string; value: number; unit: string; measurement_kind?: string }>;

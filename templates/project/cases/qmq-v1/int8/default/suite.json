@@ -3,7 +3,7 @@
   "operator_abi": "qmq-v1",
   "coverage": {
     "kind": "finite-stratified-shapes",
-    "policy_ref": "asc/full-size-policy.md",
+    "policy_ref": "cases/qmq-v1/int8/default/full-size-policy.md",
     "bounds": {
       "m": [
         1,

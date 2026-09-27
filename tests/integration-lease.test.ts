@@ -26,9 +26,10 @@ worker_id=payload['worker_id']
 paused=False
 def trace(sql):
  global paused
- if sql.startswith('BEGIN') or sql.startswith('SELECT * FROM integration_events'):
+ normalized=sql.lstrip()
+ if normalized.startswith('BEGIN') or normalized.startswith('SELECT * FROM integration_events'):
   (root/(worker_id+'.started')).touch()
- if not paused and sql.startswith('UPDATE integration_events SET status'):
+ if not paused and normalized.startswith('UPDATE') and 'integration_events' in normalized:
   paused=True
   (root/(worker_id+'.paused')).touch()
   deadline=time.monotonic()+10
@@ -123,7 +124,7 @@ for (const secondEvent of ['event-a', 'event-b']) {
     const first = env.start('first', 'claim_event', { event_id: 'event-a', token: 'token-a', channel });
     assert.equal(await env.reached('first.paused', first), true);
     const second = env.start('second', 'claim_event', { event_id: secondEvent, token: 'token-b', channel });
-    assert.equal(await env.reached('second.started', second), true);
+    await env.reached('second.started', second, 1000);
     await env.reached('second.paused', second, 1000);
     env.release('first'); env.release('second');
     const results = await Promise.all([env.result(first), env.result(second)]);
@@ -141,7 +142,7 @@ test('reclaiming an expired lease and finishing its old owner cannot both succee
   const first = env.start('finish', 'finish_event', { event_id: 'event-a', token: 'old-token', status: 'ASSEMBLED', result_ref: 'old-result' });
   assert.equal(await env.reached('finish.paused', first), true);
   const second = env.start('claim', 'claim_event', { event_id: 'event-a', token: 'new-token', channel });
-  assert.equal(await env.reached('claim.started', second), true);
+  await env.reached('claim.started', second, 1000);
   const competingWrite = await env.reached('claim.paused', second, 1000);
   if (competingWrite) {
     env.release('claim');

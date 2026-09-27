@@ -24,11 +24,22 @@ process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', () => {
   const body = JSON.parse(input);
   if (process.env.METEOR_FAKE_SSH_LOG) writeFileSync(process.env.METEOR_FAKE_SSH_LOG, JSON.stringify(body.request) + '\\n', {flag:'a'});
+  if (${JSON.stringify(mode)} === 'bundle-oracle') writeFileSync(process.env.METEOR_FAKE_SSH_LOG + '.bundle', JSON.stringify(body));
   if (!body.files['CMakeLists.txt']) {
     console.log(JSON.stringify({ok:false,error:'missing CMakeLists.txt'}));
     process.exit(0);
   }
   const req = body.request;
+  if (${JSON.stringify(mode)} === 'failure-envelope') {
+    const unknown = req.request_id === 'unknown';
+    console.log(JSON.stringify({ok:false,request_id:req.request_id,error:'command timed out',result:{
+      status:req.request_id === 'invalid' ? 'COMPLETED' : unknown ? 'UNKNOWN_REMOTE' : 'FAILED',
+      backend:'ssh',simulated:false,remote_release_confirmed:!unknown,
+      failed_command:{command:['msprof','candidate'],returncode:-9,stdout:'started',stderr:'waiting for task',timeout_seconds:900},
+      failure_context:{case_id:'c1',stage:'device_witness',completed_commands:{run:{returncode:0},verify:{returncode:0}}},
+      queue:{scope:'host',capacity:1,ticket:7,started_at:10},...(unknown?{}:{finished_at:12})}}));
+    return;
+  }
   if (${JSON.stringify(mode)} === 'queue-states') {
     const queue = {scope:'host',capacity:1,ticket:2,position:1,active_request_id:'test-first',wait_seconds:3};
     const state = {state:'queued',queue};
@@ -85,6 +96,14 @@ process.stdin.on('end', () => {
         run:{returncode:0,stdout:'run ok',stderr:''},
         verify:{returncode:1,stderr:'',stdout:JSON.stringify({passed:false,unexpected:{why:'schema changed'}})},
         device_execution:{status:'NOT_RUN',tool:'msprof',reason:'not collected because case did not pass functional execution'}}))}}));
+    return;
+  }
+  if (${JSON.stringify(mode)} === 'run-failed-verify') {
+    console.log(JSON.stringify({ok:true,result:{status:'COMPLETED',backend:'ssh',simulated:false,artifact_hash:req.artifact_hash,rendered_source_hash:req.rendered_source_hash,
+      rows:req.cases.map(c=>({case_id:c.case_id,status:'RUN_FAILED',input_hash:c.input_hash,oracle_hash:c.oracle_hash,samples_us:[1,2,3,4,5],reason:'binary returned nonzero',
+        run:{returncode:7,stdout:'partial output',stderr:'QMQ_ACL_ERROR stage=warmup_synchronize rc=507035'},
+        verify:{returncode:1,stderr:'',stdout:JSON.stringify({passed:false,error:'output/y.bin missing'})},
+        device_execution:{status:'NOT_RUN',tool:'msprof',allowed_to_pass:false}}))}}));
     return;
   }
   if (${JSON.stringify(mode)} === 'pass-no-device' || ${JSON.stringify(mode)} === 'pass-device') {
@@ -258,6 +277,37 @@ test('remoteRequest deploys full bundle and accepts real completed ssh receipt',
   assert.equal(result.simulated, false);
 }));
 
+test('workspace SSH bundle deploys the frozen registered oracle bytes and binds its hash', withFakeSsh('bundle-oracle', async (root, logPath) => {
+  const request = buildRequest(root);
+  const p = request.project;
+  p.config.schema_version = 2;
+  p.config.workspace = { workspace_id: 'workspace-fixture', hardware_ref: 'hardware/target.json' };
+  p.scope = { workspace_id: 'workspace-fixture', op_id: 'fixture-op', dtype_id: 'int8' };
+  p.target = { op_id: 'fixture-op', dtype_id: 'int8', operator_abi: 'qmq-v1', contract_ref: 'unused-contract',
+    adapter_ref: 'unused-adapter', template_ref: 'unused-template', case_suite_ref: 'unused-suite', oracle_ref: 'verifiers/selected.py' };
+  p.dataRoot = root;
+  p.snapshotRoot = join(root, 'snapshot');
+  mkdirSync(join(root, 'verifiers'), { recursive: true });
+  mkdirSync(join(p.snapshotRoot, 'verifiers'), { recursive: true });
+  const frozen = '# frozen mock oracle fixture\nprint("frozen")\n';
+  const live = '# changed mock oracle fixture\nprint("live")\n';
+  writeFileSync(join(p.snapshotRoot, p.target.oracle_ref), frozen);
+  writeFileSync(join(root, p.target.oracle_ref), live);
+  const first = await new SshRunner().build(request);
+  const bundle = JSON.parse(readFileSync(logPath + '.bundle', 'utf8'));
+  assert.equal(Buffer.from(bundle.files['verify_case.py'].base64, 'base64').toString('utf8'), frozen);
+  assert.equal(bundle.files['verify_case.py'].sha256, sha256(frozen));
+  assert.equal(bundle.bundle_hash, hashObject(bundle.files));
+  writeFileSync(join(root, p.target.oracle_ref), live + '# later edit\n');
+  const unchanged = await new SshRunner().build(request);
+  assert.equal(unchanged.remote_build_id, first.remote_build_id, 'a live oracle edit cannot change a frozen research bundle');
+  p.snapshotRoot = undefined;
+  const changed = await new SshRunner().build(request);
+  const currentBundle = JSON.parse(readFileSync(logPath + '.bundle', 'utf8'));
+  assert.notEqual(changed.remote_build_id, first.remote_build_id);
+  assert.equal(currentBundle.files['verify_case.py'].sha256, sha256(live + '# later edit\n'));
+}));
+
 test('SshRunner rejects simulated remote build receipts', withFakeSsh('simulated', async root => {
   const receipt = await new SshRunner().build(buildRequest(root));
   assert.equal(receipt.status, 'FAILED');
@@ -365,6 +415,28 @@ test('SshRunner summarizes valid verify JSON error before run fallback', withFak
   assert.doesNotMatch(reason, /run returncode=0/);
 }));
 
+test('SshRunner prioritizes the failed process over its downstream missing-output error', withFakeSsh('run-failed-verify', async root => {
+  const receipt = await new SshRunner().test({
+    project: projectWithCase(root),
+    build: completedBuild(root),
+    module: { ...module(), supported_case_ids: ['c1'] },
+    mode: 'probe',
+    case_ids: ['c1'],
+  });
+  const row = receipt.rows[0];
+  const reason = row.reason ?? '';
+  assert.equal(row.status, 'RUN_FAILED');
+  assert.deepEqual(row.samples_us, []);
+  assert.equal(row.median_us, undefined);
+  assert.match(reason, /run returncode=7: QMQ_ACL_ERROR stage=warmup_synchronize rc=507035/);
+  assert.match(reason, /verify error: output\/y\.bin missing/);
+  assert(reason.indexOf('run returncode=7') < reason.indexOf('verify error:'));
+  assert(reason.length <= 1250);
+  const raw = JSON.parse(readFileSync(join(root, receipt.raw_receipt_ref!), 'utf8'));
+  assert.equal(raw.rows[0].run.stderr, 'QMQ_ACL_ERROR stage=warmup_synchronize rc=507035');
+  assert.equal(JSON.parse(raw.rows[0].verify.stdout).error, 'output/y.bin missing');
+}));
+
 test('SshRunner preserves bounded valid but unknown verify JSON', withFakeSsh('verify-json-unknown', async root => {
   const receipt = await new SshRunner().test({
     project: projectWithCase(root),
@@ -413,4 +485,38 @@ test('SSH polling preserves queued state, cancellation release and unknown remot
   for (const line of readFileSync(logPath, 'utf8').trim().split('\n')) {
     assert.equal(JSON.parse(line).queue_root, '/tmp/meteor-shared-queue');
   }
+}));
+
+test('SSH failure envelopes preserve queue evidence and unresolved release without promoting errors to success', withFakeSsh('failure-envelope', async root => {
+  const failed = await remoteRequest(project(root), { action: 'test', request_id: 'failed' });
+  assert.equal(failed.status, 'FAILED');
+  assert.equal(failed.queue.ticket, 7);
+  assert.equal(failed.queue.started_at, 10);
+  assert.equal(failed.finished_at, 12);
+  assert.equal(failed.remote_release_confirmed, true);
+  assert.equal(failed.error, 'command timed out');
+  assert.equal(failed.failed_command.stderr, 'waiting for task');
+  assert.equal(failed.failure_context.stage, 'device_witness');
+  const unknown = await remoteRequest(project(root), { action: 'test', request_id: 'unknown' });
+  assert.equal(unknown.status, 'UNKNOWN_REMOTE');
+  assert.equal(unknown.remote_release_confirmed, false);
+  assert.equal(unknown.finished_at, undefined);
+  assert.equal(unknown.queue.ticket, 7);
+  assert.deepEqual(unknown.failed_command, failed.failed_command);
+  assert.deepEqual(unknown.failure_context, failed.failure_context);
+  const receipt = await new SshRunner().test({
+    project: projectWithCase(root), build: completedBuild(root),
+    module: { ...module(), supported_case_ids: ['c1'] }, mode: 'probe', case_ids: ['c1'],
+  });
+  assert.equal(receipt.status, 'FAILED');
+  assert.equal(receipt.rows[0].status, 'NOT_RUN');
+  assert.deepEqual(receipt.rows[0].samples_us, []);
+  assert.equal(receipt.rows[0].median_us, undefined);
+  const raw = JSON.parse(readFileSync(join(root, receipt.raw_receipt_ref!), 'utf8'));
+  assert.deepEqual(raw.failed_command, failed.failed_command);
+  assert.deepEqual(raw.failure_context, failed.failure_context);
+  const invalid = await remoteRequest(project(root), { action: 'test', request_id: 'invalid' });
+  assert.equal(invalid.status, 'FAILED');
+  assert.equal(invalid.remote_release_confirmed, false);
+  assert.match(invalid.error, /failure.*status/i);
 }));

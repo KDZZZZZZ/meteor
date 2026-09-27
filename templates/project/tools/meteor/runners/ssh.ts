@@ -9,6 +9,8 @@ import { assert, hashObject, inside, readJson, sha256, writeImmutable } from '..
 import type { BuildRequest, ProfileRequest, Runner, TestRequest } from './contract.ts';
 import { selectCases, summarizeRows } from './contract.ts';
 import { hasDeviceExecution } from '../device-evidence.ts';
+import { buildReceiptPath, receiptRef } from '../kernel-build.ts';
+import { assertTarget, isWorkspace, scopeKey, statePath, targetFile, targetRef } from '../workspace.ts';
 
 const BOOTSTRAP = `import hashlib,json,subprocess,sys,base64,os,tempfile
 from pathlib import Path
@@ -39,21 +41,26 @@ with tempfile.TemporaryFile(mode='w+',encoding='utf-8') as request_input:
 sys.exit(result.returncode)
 `;
 function shellQuote(value: string) { return "'" + value.replaceAll("'", "'\\''") + "'"; }
-function bundleFiles() {
+function bundleFiles(project?: Project) {
   const root = fileURLToPath(new URL('./remote/', import.meta.url));
-  return Object.fromEntries(readdirSync(root).filter(name => /^(CMakeLists\.txt|README\.md)$/.test(name) || /\.(py|asc|txt|cpp|h)$/.test(name)).map(name => {
+  const files = Object.fromEntries(readdirSync(root).filter(name => /^(CMakeLists\.txt|README\.md)$/.test(name) || /\.(py|asc|txt|cpp|h)$/.test(name)).map(name => {
     const data = readFileSync(join(root, name));
     return [name, { base64: data.toString('base64'), sha256: sha256(data) }];
   }));
+  if (project?.target && isWorkspace(project)) {
+    const oracle = readFileSync(targetFile(project, 'oracle_ref'));
+    files['verify_case.py'] = { base64: oracle.toString('base64'), sha256: sha256(oracle) };
+  }
+  return files;
 }
-function bundleHash() { return hashObject(bundleFiles()); }
+function bundleHash(project: Project) { return hashObject(bundleFiles(project)); }
 function rawRef(project: Project, result: unknown) {
-  const path = join(project.dataRoot, 'remote-receipts', hashObject(result) + '.json');
+  const path = statePath(project, 'remote-receipts', hashObject(result) + '.json');
   writeImmutable(path, result);
   return relative(project.root, path).replaceAll('\\', '/');
 }
-function remoteIdempotency(prefix: string, key?: string) {
-  return `${prefix}-${key ?? randomUUID()}`;
+export function remoteIdempotency(project: Project, prefix: string, key?: string) {
+  return `${prefix}-${isWorkspace(project) ? sha256(scopeKey(project)).slice(0, 16) + '-' : ''}${key ?? randomUUID()}`;
 }
 function normalizeRemoteStatus(status: string): 'COMPLETED' | 'FAILED' | 'UNKNOWN_REMOTE' {
   if (status === 'COMPLETED' || status === 'FINISHED') return 'COMPLETED';
@@ -131,10 +138,10 @@ function rowFailureReason(remote: any): string | undefined {
   }
   if (!details.length && stderr) details.push(`verify stderr: ${trimDiagnostic(stderr, 900)}`);
   const run = remote.run;
-  if (!details.length && run) {
+  if (run && (!details.length || (typeof run.returncode === 'number' && run.returncode !== 0))) {
     const runError = String(run.stderr ?? '').trim() || String(run.stdout ?? '').trim();
     const code = run.returncode === undefined ? 'unknown' : String(run.returncode);
-    details.push(`run returncode=${code}${runError ? `: ${trimDiagnostic(runError, 900)}` : ''}`);
+    details.unshift(`run returncode=${code}${runError ? `: ${trimDiagnostic(runError, 900)}` : ''}`);
   }
   if (!details.length) return base;
   return trimDiagnostic([base, ...details].filter(Boolean).join('; '), 1200);
@@ -146,7 +153,7 @@ export async function remoteRequest(project: Project, request: any, signal?: Abo
   const environment = project.config.environment;
   const deviceId = request.action === 'hardware' ? profile.device_id : environment.device_id ?? profile.device_id;
   const npuArch = request.action === 'hardware' ? profile.npu_arch : environment.npu_arch ?? profile.npu_arch;
-  const files = bundleFiles();
+  const files = bundleFiles(project);
   const body = { remote_root: profile.remote_root, env_script: profile.env_script, driver_path: profile.driver_path,
     bundle_hash: hashObject(files), files, request: { ...request, remote_root: profile.remote_root,
       env_script: profile.env_script, ...(deviceId === undefined ? {} : { device_id: Number(deviceId) }),
@@ -181,7 +188,16 @@ export async function remoteRequest(project: Project, request: any, signal?: Abo
       }
       try {
         assert(envelope.request_id === undefined || envelope.request_id === request.request_id, 'Remote request identity mismatch');
-        const result = envelope.ok === true ? { ...envelope.result, request_id: request.request_id } : { status: 'FAILED', error: envelope.error, request_id: request.request_id };
+        const structuredFailure = envelope.ok !== true && envelope.result !== undefined;
+        if (structuredFailure) {
+          assert(['FAILED', 'UNKNOWN_REMOTE'].includes(envelope.result?.status), 'Remote failure envelope has invalid status');
+          assert(envelope.result.request_id === undefined || envelope.result.request_id === request.request_id, 'Remote request identity mismatch');
+          assert(envelope.result.status !== 'UNKNOWN_REMOTE' || envelope.result.remote_release_confirmed !== true,
+            'Remote failure has contradictory release evidence');
+        }
+        const result = envelope.ok === true || structuredFailure
+          ? { ...envelope.result, ...(structuredFailure ? { error: envelope.error ?? envelope.result.error } : {}), request_id: request.request_id }
+          : { status: 'FAILED', error: envelope.error, request_id: request.request_id, remote_release_confirmed: false };
         assert(result && typeof result.status === 'string', 'Remote response has no status');
         if (result.request_id === undefined) result.request_id = envelope.request_id ?? request.request_id;
         assert(result.simulated !== true, 'SSH transport rejects simulated remote receipts');
@@ -197,7 +213,7 @@ export async function remoteRequest(project: Project, request: any, signal?: Abo
   });
 }
 function casesPayload(project: Project, selected: ReturnType<typeof selectCases>, supported: string[]) {
-  const verifier = readFileSync(fileURLToPath(new URL('./remote/verify_case.py', import.meta.url)));
+  const verifier = readFileSync(isWorkspace(project) ? targetFile(project, 'oracle_ref') : fileURLToPath(new URL('./remote/verify_case.py', import.meta.url)));
   return selected.map(c => {
     if (!supported.includes(c.case_id)) return { ...c, files: {} };
     assert(c.data_ref, 'Real cases require data_ref with pinned input/golden files');
@@ -220,17 +236,18 @@ function casesPayload(project: Project, selected: ReturnType<typeof selectCases>
     return { ...c, files };
   });
 }
-function common(project: Project) { return { case_suite_revision: project.suite.revision, environment_ref: project.config.environment.environment_ref,
+function common(project: Project) { return { ...(targetRef(project) ? { target: targetRef(project) } : {}),
+  case_suite_revision: project.suite.revision, environment_ref: project.config.environment.environment_ref,
   measurement_protocol_ref: project.config.environment.measurement_protocol_ref, warmup: 3, repetitions: 5 }; }
 
 export class SshRunner implements Runner {
   async build(request: BuildRequest): Promise<BuildReceipt> {
     assert(request.fixture === undefined, 'Mock fixtures cannot be used with SSH');
-    const remoteId = hashObject({ source: request.rendered_source_hash, env: request.project.config.environment, module: request.module, bundle: bundleHash() });
+    const remoteId = hashObject({ target: targetRef(request.project), source: request.rendered_source_hash, env: request.project.config.environment, module: request.module, bundle: bundleHash(request.project) });
     let result: any;
     try {
       assert(request.rendered_source && sha256(request.rendered_source) === request.rendered_source_hash, 'Rendered source identity missing');
-      result = await remoteRequest(request.project, { ...common(request.project), action: 'build', request_id: remoteIdempotency('build', request.idempotency_key), build_id: remoteId,
+      result = await remoteRequest(request.project, { ...common(request.project), action: 'build', request_id: remoteIdempotency(request.project, 'build', request.idempotency_key), build_id: remoteId,
         source_base64: Buffer.from(request.rendered_source).toString('base64'), rendered_source_hash: request.rendered_source_hash }, request.signal);
     } catch (error) { result = { status: 'FAILED', error: (error as Error).message }; }
     const ref = rawRef(request.project, result);
@@ -239,6 +256,7 @@ export class SshRunner implements Runner {
     assert(status !== 'COMPLETED' || result.rendered_source_hash === request.rendered_source_hash, 'Remote rendered source hash mismatch');
     assert(status !== 'COMPLETED' || /^[a-f0-9]{64}$/.test(result.artifact_hash), 'Remote build omitted actual ELF hash');
     return { build_id: hashObject({ research: request.research_id, experiment: request.experiment_id, remoteId, ref }).slice(0,24),
+      ...(targetRef(request.project) ? { target: targetRef(request.project) } : {}),
       research_id: request.research_id, experiment_id: request.experiment_id, kernel_ref: { kernel_id: request.module.kernel_id, revision: request.module.revision },
       source_hash: request.source_hash, artifact_hash: result.artifact_hash ?? '', environment_ref: request.project.config.environment.environment_ref,
       execution_backend: 'ssh', simulated: false, status, source_ref: request.kernel_path, module_ref: request.kernel_path + '/kernel.json',
@@ -246,6 +264,7 @@ export class SshRunner implements Runner {
       raw_receipt_ref: ref, remote_release_confirmed: releaseConfirmed(result), error: status === 'COMPLETED' ? undefined : failedBuildDiagnostic(result) };
   }
   async test(request: TestRequest): Promise<TestReceipt> {
+    assertTarget(request.project, request.build.target, 'SSH build');
     assert(request.fixture === undefined, 'Mock fixtures cannot be used with SSH');
     const selected = selectCases(request.project, request.mode, request.case_ids);
     let result: any;
@@ -255,7 +274,7 @@ export class SshRunner implements Runner {
         artifact_hash: request.build.artifact_hash, rendered_source_hash: request.build.rendered_source_hash,
         kernel_name: request.module.symbol_prefix,
         cases: casesPayload(request.project, selected, request.module.supported_case_ids), supported_case_ids: request.module.supported_case_ids };
-      result = await remoteRequest(request.project, { ...payload, request_id: remoteIdempotency('test', request.idempotency_key) }, request.signal);
+      result = await remoteRequest(request.project, { ...payload, request_id: remoteIdempotency(request.project, 'test', request.idempotency_key) }, request.signal);
     }
     if (result.status === 'COMPLETED') {
       assert(result.artifact_hash === request.build.artifact_hash, 'Remote test artifact hash mismatch');
@@ -285,19 +304,20 @@ export class SshRunner implements Runner {
     const raw = rawRef(request.project, result);
     return { run_id: hashObject({ build: request.build.build_id, mode: request.mode, raw }).slice(0,24),
       research_id: request.build.research_id, experiment_id: request.build.experiment_id, kernel_ref: request.build.kernel_ref,
-      build_ref: `reports/meteor/ssh/research/${request.build.research_id}/experiments/${request.build.experiment_id}/builds/${request.build.build_id}.json`,
+      build_ref: receiptRef(request.project, buildReceiptPath(request.project, request.build)),
       source_hash: request.build.source_hash, artifact_hash: request.build.artifact_hash, execution_backend: 'ssh', simulated: false,
       ...common(request.project), mode: request.mode, status: result.status === 'CANCELLED' ? 'CANCELLED' : normalizeRemoteStatus(result.status),
       rows, ...summarizeRows(rows, request.mode, request.project), data_hash: hashObject(rows),
       remote_request_id: result.request_id, raw_receipt_ref: raw, remote_release_confirmed: releaseConfirmed(result) } as TestReceipt;
   }
   async profile(request: ProfileRequest): Promise<ProfileReceipt> {
+    assertTarget(request.project, request.build.target, 'SSH build');
     assert(request.fixture === undefined && request.build.status === 'COMPLETED', 'Profile requires a real completed build');
     const payload = { ...common(request.project), action: 'profile', build_id: request.build.remote_build_id, artifact_hash: request.build.artifact_hash,
       rendered_source_hash: request.build.rendered_source_hash,
       cases: casesPayload(request.project, selectCases(request.project, 'probe', request.case_ids), request.module.supported_case_ids),
       supported_case_ids: request.module.supported_case_ids, kernel_name: request.module.symbol_prefix, metrics: request.metrics };
-    const result = await remoteRequest(request.project, { ...payload, request_id: remoteIdempotency('profile', request.idempotency_key) }, request.signal);
+    const result = await remoteRequest(request.project, { ...payload, request_id: remoteIdempotency(request.project, 'profile', request.idempotency_key) }, request.signal);
     const raw = rawRef(request.project, result);
     if (result.status === 'COMPLETED') {
       assert(result.artifact_hash === request.build.artifact_hash, 'Remote profile artifact hash mismatch');
@@ -318,6 +338,8 @@ export class SshRunner implements Runner {
       }
     }
     return { profile_id: hashObject({ build: request.build.build_id, raw }).slice(0,24), research_id: request.build.research_id,
+      ...(targetRef(request.project) ? { target: targetRef(request.project) } : {}),
+      build_ref: receiptRef(request.project, buildReceiptPath(request.project, request.build)),
       experiment_id: request.build.experiment_id, kernel_ref: request.build.kernel_ref, source_hash: request.build.source_hash,
       environment_ref: request.project.config.environment.environment_ref, execution_backend: 'ssh', simulated: false,
       instrumented: result.instrumented === true, measurement_kind: result.measurement_kind ?? 'acl_event_interval',
