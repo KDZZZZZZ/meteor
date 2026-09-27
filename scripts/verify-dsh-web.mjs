@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { hashObject, writeJson } from '../dist/templates/project/tools/meteor/util.js';
 
 const modules = resolve(process.argv[2] ?? process.env.METEOR_DSH_MODULE_ROOT ?? '');
 const version = JSON.parse(readFileSync(join(modules, '@deepseek-ai/dsh/package.json'), 'utf8')).version;
@@ -91,6 +92,24 @@ try {
   config.execution = { backend: 'mock', profile_ref: 'mock-qmq-v1' };
   config.environment = { environment_ref: 'mock-ascend-qmq-v1', hardware: 'simulated-ascend',
     toolchain: 'mock-no-compiler', measurement_protocol_ref: 'mock-median-5-v1', simulated: true };
+  // Synthetic shared preparation for this mock-only protocol test. Real model
+  // publication remains restricted to Chief-authored SSH device evidence.
+  const modelValue = { chief_id: chief.id, evidence: [], model: {
+    schema_version: 1, model_id: 'web-contract', hardware_id: 'mock-web-device',
+    environment_ref: config.environment.environment_ref,
+    sources: [
+      { id: 'doc', kind: 'documentation', ref: 'mock-doc', version: 'mock', description: 'Synthetic protocol documentation' },
+      { id: 'experiment', kind: 'experiment', ref: 'mock-experiment', description: 'Synthetic fixture; no device experiment' },
+    ],
+    resources: [{ id: 'protocol', description: 'Fictional protocol resource', evidence_refs: ['doc'] }],
+    primitives: [{ id: 'protocol', description: 'Fictional protocol primitive', resources: ['protocol'], graph_required: true, evidence_refs: ['doc'] }],
+    constraints: [], limitations: ['Mock fixture only; no hardware capability claims'],
+  } };
+  const modelHash = hashObject(modelValue);
+  const modelRef = `hardware/execution-models/web-contract/${modelHash}.json`;
+  writeJson(join(project, modelRef), { value: modelValue, content_hash: modelHash });
+  writeJson(join(project, config.workspace.hardware_ref), { state: 'bound', hardware_id: 'mock-web-device' });
+  config.design = { ...config.design, hardware_model_ref: modelRef };
   writeFileSync(configPath, JSON.stringify(config));
   const chiefSkill = await chiefSkills.get('meteor-kernel-test', skillOptions);
   assert.equal(chiefSkill?.path, join(project, '.dsh/skills/meteor-kernel-test/SKILL.md'));
@@ -120,6 +139,10 @@ try {
   assert(childStartupPrompt, 'Child startup package must include the METEOR_RESEARCH contract block');
   const startup = JSON.parse(childStartupPrompt.split('\n').slice(1).join('\n'));
   const researchDirectory = join(project, '.meteor/mock/research', target.op_id, target.dtype_id, 'web-contract');
+  assert.equal(readFileSync(join(researchDirectory, 'snapshot', modelRef), 'utf8'),
+    readFileSync(join(project, modelRef), 'utf8'), 'Child must reuse the exact shared preparation snapshot');
+  assert(!tools.schemas(child).some(tool => ['meteor_hardware_probe', 'meteor_hardware_experiment', 'meteor_hardware_model'].includes(tool.name)),
+    'Child must not repeat Chief hardware preparation');
   assert.equal(startup.research_directory, researchDirectory);
   assert.deepEqual(startup.target, status.target);
   const seed = JSON.parse(readFileSync(startup.seed_ref, 'utf8'));
